@@ -1,0 +1,302 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.fabro.sh/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Environments
+
+> Reusable named execution environments for workflow runs
+
+Fabro separates **environments** from **sandboxes**:
+
+* An **environment** is reusable desired configuration: provider, image, resources, network, lifecycle, labels, and environment variables.
+* A **sandbox** is the concrete runtime instance Fabro creates for a run from the selected environment.
+
+<Warning>
+  Older pre-v1.0 config files that still use `[run.sandbox]` are temporarily auto-migrated when Fabro loads them from disk. Fabro writes a sibling `*.legacy-sandbox-migration.bak` file, rewrites the config to `[run.environment]` plus an environment definition, and then continues startup.
+
+  Similarly, `[environments.*]` tables in the server's active `settings.toml` are auto-migrated on startup. Existing sibling `environments/*.toml` files are then treated as a legacy import source: Fabro imports missing environment IDs into SQLite once and renames the directory to `environments.imported-<timestamp>.bak`.
+
+  These compatibility rewrites only handle direct field mappings. Unsupported legacy fields fail with a migration message that lists the keys to edit manually. The rewrite paths will be removed before v1.0.
+</Warning>
+
+Runs select environments by slug:
+
+```toml title="workflow.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[run.environment]
+id = "fabro-dev"
+```
+
+Server-managed environments are stored in the server SQLite database. Manage them through the web UI or the `/api/v1/environments` REST API. Install seeds `default` as an ordinary persisted environment; users can replace or delete it. `local` is reserved, synthetic, and unpersisted: it appears only when the local sandbox provider is enabled, and it cannot be created, replaced, or deleted through the environments API. Workflow and project TOML can additionally define `[environments.<slug>]` catalog entries that merge with the server catalog through the normal settings precedence.
+
+## Defining Server Environments
+
+Create server-managed environments through the REST API. Stored environments use inline Dockerfile content; local Dockerfile paths are rejected by the API because the server cannot safely resolve client-side paths.
+
+```json title="POST /api/v1/environments" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+{
+  "id": "fabro-dev",
+  "provider": "daytona",
+  "cwd": null,
+  "image": {
+    "docker": null,
+    "dockerfile": {
+      "type": "inline",
+      "value": "FROM buildpack-deps:noble\n"
+    }
+  },
+  "resources": {
+    "cpu": 8,
+    "memory": "16GB",
+    "disk": "20GB"
+  },
+  "network": {
+    "mode": "cidr_allow_list",
+    "allow": ["10.0.0.0/8"]
+  },
+  "lifecycle": {
+    "preserve": false,
+    "stop_on_terminal": true,
+    "auto_stop": "30m"
+  },
+  "labels": {
+    "repo": "fabro-sh/fabro"
+  },
+  "env": {
+    "NODE_ENV": "development"
+  }
+}
+```
+
+Server-managed local-provider environments can also set `cwd`, an optional runtime
+command working directory:
+
+```json title="POST /api/v1/environments" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+{
+  "id": "host",
+  "provider": "local",
+  "cwd": "/srv/fabro/workspaces/team-a",
+  "image": {
+    "docker": null,
+    "dockerfile": null
+  },
+  "resources": {
+    "cpu": null,
+    "memory": null,
+    "disk": null
+  },
+  "network": {
+    "mode": "allow_all",
+    "allow": []
+  },
+  "lifecycle": {
+    "preserve": false,
+    "stop_on_terminal": true,
+    "auto_stop": null
+  },
+  "labels": {},
+  "env": {}
+}
+```
+
+`cwd` is owned by the server environment and is only honored by the `local`
+provider. It is not a replacement for `run.working_dir`. Docker and Daytona
+ignore `cwd` and report a preflight warning because those clone-based providers
+own their workspace layout. Workflow, project, user, and direct-run
+`[environments.<slug>]` catalogs cannot set `cwd`; configure it in the
+server-managed environment through the environments API.
+
+The same fields nest under `[environments.<slug>]` when defined in workflow or project TOML instead:
+
+```toml title="workflow.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[run.environment]
+id = "fabro-dev"
+
+[environments.fabro-dev]
+provider = "daytona"
+
+[environments.fabro-dev.image]
+dockerfile = { path = "Dockerfile" }
+
+[environments.fabro-dev.resources]
+cpu = 8
+memory = "16GB"
+disk = "20GB"
+
+[environments.fabro-dev.network]
+mode = "cidr_allow_list"       # allow_all | block | cidr_allow_list
+allow = ["10.0.0.0/8"]
+
+[environments.fabro-dev.lifecycle]
+preserve = false
+stop_on_terminal = true
+auto_stop = "30m"
+
+[environments.fabro-dev.labels]
+repo = "fabro-sh/fabro"
+
+[environments.fabro-dev.env]
+NODE_ENV = "development"
+```
+
+Run-level overrides are sparse and apply only to the selected environment:
+
+```toml title="workflow.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[run.environment]
+id = "fabro-dev"
+
+[run.environment.resources]
+memory = "32GB"
+
+[run.environment.lifecycle]
+preserve = true
+```
+
+`env` and `labels` merge by key.
+
+## Environment value interpolation
+
+Environment `env` values can mix literal text with `{{ vars.NAME }}` and `{{ secrets.NAME }}` tokens:
+
+```toml title="workflow.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[environments.fabro-dev.env]
+DEPLOY_ENV = "{{ vars.DEPLOY_ENV }}"
+SERVICE_URL = "https://api.{{ vars.REGION }}.example.com"
+SERVICE_TOKEN = "{{ secrets.SERVICE_TOKEN }}"
+```
+
+Server-managed variables resolve when the run is created. Token secrets resolve immediately before the sandbox starts, so resolved secret values are not persisted in the run definition. A missing or non-token secret fails closed, as does any `{{ env.* }}` reference: the process environment is not a configuration source.
+
+## Selecting an environment from the CLI
+
+Use `--environment` with an environment slug:
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+fabro run workflow.fabro --environment fabro-dev
+fabro preflight workflow.fabro --environment ci
+fabro server start --environment default
+```
+
+`--preserve-sandbox` still controls the concrete runtime instance lifecycle for a run. Runtime commands such as `fabro sandbox ssh` keep the word "sandbox" because they operate on an already-created runtime instance.
+
+## Seeded Environments
+
+Install seeds a `default` environment into SQLite. It is a normal persisted environment, so deleting it removes the default run target until you recreate it. The standard Docker default is:
+
+```json title="GET /api/v1/environments/default" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+{
+  "id": "default",
+  "provider": "docker",
+  "image": {
+    "docker": "buildpack-deps:noble",
+    "dockerfile": null
+  },
+  "resources": {
+    "cpu": 2,
+    "memory": "4GB",
+    "disk": null
+  },
+  "network": {
+    "mode": "allow_all",
+    "allow": []
+  },
+  "lifecycle": {
+    "preserve": false,
+    "stop_on_terminal": true,
+    "auto_stop": null
+  },
+  "labels": {},
+  "env": {}
+}
+```
+
+`local` is not stored in SQLite. It is synthesized at runtime when the local sandbox provider is enabled.
+
+## Provider mappings
+
+| Environment field                  | Local                                 | Docker                     | Daytona                                               |
+| ---------------------------------- | ------------------------------------- | -------------------------- | ----------------------------------------------------- |
+| `image.docker`                     | Ignored                               | Docker image               | Snapshot base image; Fabro computes the snapshot name |
+| `image.dockerfile`                 | Ignored                               | Warning; ignored           | Snapshot Dockerfile; Fabro computes the snapshot name |
+| `resources.cpu`                    | Warning; ignored                      | `cpu_quota = cpu * 100000` | Snapshot CPU                                          |
+| `resources.memory`                 | Warning; ignored                      | Container memory limit     | Snapshot memory                                       |
+| `resources.disk`                   | Warning; ignored                      | Warning; ignored           | Snapshot disk                                         |
+| `network.mode = "allow_all"`       | Host network                          | Docker default bridge      | Daytona allow-all                                     |
+| `network.mode = "block"`           | Error                                 | Docker `none` network      | Daytona block                                         |
+| `network.mode = "cidr_allow_list"` | Error                                 | Error                      | Daytona CIDR allow-list                               |
+| `labels`                           | Warning; ignored                      | Warning; ignored           | Daytona labels                                        |
+| `lifecycle.auto_stop`              | Warning; ignored                      | Warning; ignored           | Daytona auto-stop                                     |
+| `env`                              | Process environment overlay           | Container environment      | Sandbox environment                                   |
+| `cwd`                              | Server-side command working directory | Warning; ignored           | Warning; ignored                                      |
+
+## Local
+
+`local` runs tools directly in the resolved working directory. It offers no filesystem or network isolation, so use it only for trusted workflows.
+
+Create a server-managed local-provider environment through the environments API when you need a host `cwd`.
+
+A version-backed run intent can submit
+`{ "kind": "folder", "path": "/absolute/server/path" }` to run in an existing
+server directory. Fabro accepts this target only with a Local environment,
+resolves symlinks and `..`, requires an existing directory, and persists the
+canonical UTF-8 path. The target path takes precedence over the environment's
+`cwd`. Because the run executes in place with the Local provider's unrestricted
+host access, use folder targets only in trusted single-tenant deployments.
+Docker and Daytona always reject folder targets. This does not add Local Git
+cloning or Local scratch workspaces for the `none` target. Local folder runs
+execute in place without Fabro Git checkpoints: retries retain the canonical
+folder target, but fork and rewind are unavailable for these runs.
+
+When `cwd` is set, local runs execute commands from that absolute server-side
+path. When it is unset, Fabro keeps same-host compatibility by using the
+submitted source directory only if that path exists on the server. If neither is
+available, the run fails before execution with a remediation to configure
+`cwd`.
+
+Fabro hard-errors if a local environment asks for blocked or CIDR-restricted networking because the provider cannot enforce it.
+
+## Docker
+
+Docker runs tools inside a container created from `image.docker`. Docker is the built-in default provider.
+
+```toml title="workflow.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[environments.ci]
+provider = "docker"
+
+[environments.ci.image]
+docker = "buildpack-deps:noble"
+
+[environments.ci.resources]
+cpu = 2
+memory = "4GB"
+
+[environments.ci.network]
+mode = "block"
+```
+
+Docker and Daytona are clone-based providers. When a run has a GitHub origin, Fabro clones it into the provider workspace with a history depth of 100. Set `[run.clone] enabled = false` to start a manifest-backed run with an empty workspace. Set `[run.clone] depth = 0` to clone full history. A version-backed run intent can instead submit the explicit `{ "kind": "none" }` target, which forces an empty provider workspace regardless of the workflow's clone setting. Its Git target may select a branch, an optional bare tag, an optional exact commit SHA, or both tag and SHA. Both providers attach the selected revision to the target's working branch; an exact SHA wins over a tag, and unavailable tags or commits fail without branch fallback. The `none` target is not supported by Local environments, while the Local-only `folder` target is rejected by Docker and Daytona. Docker and Daytona ignore `cwd`; use the provider-owned workspace layout and `run.working_dir` for repository-relative commands.
+
+The image must provide `/bin/bash`; Fabro evaluates every sandbox command with it and has no `sh` fallback. Commands run in a **non-login** shell, so login profiles (`/etc/profile.d/*.sh`, `~/.bash_profile`, and `nvm`/`rbenv`/`sdkman` initializers) are not sourced — put anything they set into the Dockerfile's `ENV` instead. Fabro verifies Bash during initialization and again on resume, and fails with remediation rather than reporting the sandbox ready.
+
+## Daytona
+
+Daytona runs tools in a cloud sandbox. Set either `image.docker` to use an existing Docker image or `image.dockerfile` to build a custom image. Fabro computes a deterministic internal snapshot name from the selected image source, resource hints, a single-tenant scope, and the Daytona API key. If neither field is set, Fabro uses Daytona's built-in `daytona-medium` snapshot.
+
+```toml title="workflow.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[environments.cloud]
+provider = "daytona"
+
+[environments.cloud.image]
+docker = "python:3.11-slim"
+
+[environments.cloud.resources]
+cpu = 4
+memory = "8GB"
+disk = "20GB"
+
+[environments.cloud.lifecycle]
+auto_stop = "30m"
+
+[environments.cloud.network]
+mode = "cidr_allow_list"
+allow = ["208.80.154.232/32", "10.0.0.0/8"]
+```

@@ -1,0 +1,264 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.fabro.sh/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Server Operations
+
+> Operate the Fabro server: starting, install wizard, auth, web UI, and pointing the CLI at it
+
+<Warning>
+  The server interface is in private early access. Contact [bryan@qlty.sh](mailto:bryan@qlty.sh) if you're interested in trying it.
+</Warning>
+
+This page covers operating the Fabro server once it's running, whether locally on your laptop or self-hosted in a container. For where to run it, see [Deployment](/administration/deployment).
+
+## Starting the server
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+fabro server start
+```
+
+This starts the server on a Unix socket at `~/.fabro/fabro.sock` by default. Use `--bind 127.0.0.1` for TCP.
+
+### First run: web install wizard
+
+If `~/.fabro/settings.toml` does not yet exist, `fabro server start` enters **install mode**: it prints an install URL and a one-time install token, attempts to open the URL in your default browser, and serves a web wizard that walks you through configuring your server URL, shared object store, LLM provider, and GitHub integration.
+
+The LLM step can be completed with one or more provider keys, or explicitly skipped so you can finish server setup first and add model credentials later. A skipped LLM step writes no LLM vault credentials; LLM-dependent workflows keep failing with provider-not-configured errors until credentials are added. Optional integration secrets collected by install mode, including LLM keys and GitHub App secrets, are written to the server vault rather than `server.env`.
+
+When Fabro can construct a direct install URL, the token is embedded in the URL and also printed on its own line for copying. If you open the server root through a reverse proxy or another machine, paste the printed install token when prompted.
+
+The `Object store` step offers two wizard-managed modes:
+
+* `Local disk` for a host-local object-store root, detected by default and editable before continuing
+* `AWS S3` for one shared bucket with fixed `slatedb/` and `artifacts/` prefixes
+
+The wizard's manual-credential path stores only `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in `server.env`. It does not collect STS/session tokens or S3-compatible endpoint settings. If you need MinIO, Cloudflare R2, path-style options, or custom endpoints, finish install with local defaults and then edit `[server.slatedb]` / `[server.artifacts]` in `settings.toml` manually.
+
+When you finish the wizard, the server writes `~/.fabro/settings.toml` and exits cleanly. Start it again to boot in configured mode:
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+fabro server start
+```
+
+Under a process supervisor with a restart policy (for example docker-compose `restart: unless-stopped`, systemd, or Railway's restart-on-exit) this second start happens automatically.
+
+For headless or scripted environments where no browser is available, run `fabro install` instead — it's the same wizard as a CLI prompt flow.
+
+Common flags:
+
+| Flag                    | Default               | Description                                                           |
+| ----------------------- | --------------------- | --------------------------------------------------------------------- |
+| `--bind`                | `~/.fabro/fabro.sock` | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket |
+| `--model`               | —                     | Override default LLM model                                            |
+| `--environment`         | —                     | Override default environment slug                                     |
+| `--max-concurrent-runs` | `5`                   | Maximum concurrent run executions                                     |
+
+See [Server Configuration](/administration/server-configuration) for the full `settings.toml` reference.
+
+### SQLite blob storage activation
+
+On startup, Fabro activates SQLite as the only live content-addressed blob
+store before it opens routes, schedulers, workers, webhooks, reapers, or the
+ready callback. The activation inventories the exact legacy SlateDB blob
+prefix and run history, then checks disk headroom for the rows not yet
+imported, any required blob backup, and the projected post-import database
+snapshot required by run-history activation. A warm restart with no pending
+imports or backups only needs a small fixed headroom; on filesystems whose free
+space cannot be determined the check is skipped with a warning. Fabro then
+imports in bounded transactions, compares every legacy blob byte-for-byte with
+SQLite, runs a live SQLite integrity check, and attempts a final WAL truncate
+checkpoint. A busy final truncate logs a warning and startup continues so a
+later checkpoint can finish after the blocking reader exits.
+Boots that import new rows additionally re-verify every
+legacy blob against SQLite and validate every SQLite blob row independently.
+Any failure stops startup. Warm boots that import no rows skip that full target
+scan: the import pass has already byte-compared every retained legacy row, and
+SQLite-only blobs are hash-validated when read. Rows committed by an interrupted
+import are retained so the next startup can resume, but the legacy source is
+never modified and there is no fallback or dual read/write path.
+
+For a non-empty legacy inventory, the first activation also creates the
+private sibling backup
+`fabro.sqlite3.pre-blob-activation.bak`. Fabro writes the staging database
+inside a private same-directory area, applies owner-only permissions, flushes
+and validates it, then publishes the backup without overwriting an existing file.
+A valid retained backup is revalidated on every warm restart and is preserved
+as the original pre-activation safety artifact. If any legacy row is already
+present in SQLite, a missing retained backup stops startup rather than silently
+moving that rollback boundary forward. It is not a promise that an
+older binary can safely resume after the activated server has accepted new
+work; recovery after that boundary is forward-only. Empty legacy inventories
+do not need this backup.
+
+Keep both the unchanged legacy `blobs/sha256` prefix and the private activation
+backup for at least 30 consecutive calendar days after the first successful
+production activation. Cleanup is eligible only after a successful cold
+activation, a later warm restart that revalidates the backup and byte-compares
+every retained legacy blob against SQLite, and 30 days of production observation
+with no unresolved inventory, import, verification, integrity, backup, or
+checkpoint failure. Scott must review that evidence and explicitly authorize a
+separate cleanup change. Day 30 is only the earliest eligibility date; nothing
+is deleted automatically, and incomplete evidence extends the support window.
+
+### SQLite run-history activation
+
+Immediately after blob activation, and still before routes, schedulers,
+workers, webhooks, reapers, or readiness are exposed, Fabro activates SQLite
+as the sole authority for run existence, run events, and each run's current
+projected row. The activation strictly validates and fingerprints the exact
+legacy SlateDB run-event key/value stream, imports each complete run in its own
+transaction, verifies every legacy history as an exact SQLite prefix, replays
+and verifies every SQLite run independently, and runs a full SQLite integrity
+check. It attempts a final WAL truncate checkpoint, but a blocking reader only
+produces a warning because committed activation data remains durable in the
+WAL. A source fingerprint or count change after activation stops startup. There
+is no fallback or dual-read/write mode.
+
+For a non-empty legacy run history, the first activation creates and validates
+the private sibling backup
+`fabro.sqlite3.pre-run-history-activation.bak` before importing anything. The
+backup is published without overwriting an existing file and is revalidated
+on every restart. If import progress exists but that retained backup is
+missing, startup stops. An empty legacy source is accepted without a backup
+only when SQLite also has no unmarked run data. The activation marker stores
+the source identity and first-success timestamp; retries preserve that
+timestamp and repeat source, destination, backup, and integrity checks.
+
+After activation, creating a run commits `run.created`, the run's current row,
+and its existence atomically. Later appends update the event log and current
+row in one transaction, and live streams advance only after commit. Deleting
+a migrated run commits a tombstone with the SQL deletion so the retained
+legacy source cannot resurrect it during a restart.
+
+Keep the unchanged legacy `runs/*/events/*` data and the private activation
+backup for at least 30 consecutive calendar days after the persisted
+first-success timestamp. Cleanup also requires successful cold and warm
+activation evidence, production observation, backup and restore validation,
+deletion/restart coverage, and explicit approval for a separate cleanup
+change. Nothing is deleted automatically. The run-history activation backup
+represents the database immediately before run-history import and can be used
+to retry or recover the activation with a binary that knows the activated
+schema. It is not a binary-downgrade artifact because it already contains the
+new SQL migrations.
+
+To return to the older binary, stop the server and restore the database's
+`.pre-migration.bak` snapshot instead, then remove any `-wal` and `-shm`
+siblings before starting the older binary. That snapshot was taken before the
+new migrations were applied. Either recovery path loses writes accepted after
+its snapshot, so make the rollback boundary explicit before restoring it.
+
+## Submitting runs
+
+Workflows are submitted via the REST API and executed in the background. The exact request body is documented in the API reference:
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+curl -X POST http://localhost:3000/api/v1/runs
+```
+
+The server returns immediately with a run ID. After a start request, a background scheduler promotes `runnable` runs to `running` in FIFO order, up to the concurrency limit. Parent-generated [child runs](/execution/child-runs) can remain `pending` until a user approves them.
+
+## Run lifecycle
+
+1. **Submit** — `POST /api/v1/runs` creates the run with status `submitted`.
+2. **Start request** — `POST /api/v1/runs/{id}/start` makes normal runs `runnable`; parent-generated [child runs](/execution/child-runs) may become `pending` with `approval_required`.
+3. **Approve if needed** — Approving a pending child run makes it `runnable`; denying it fails with `approval_denied`.
+4. **Schedule** — The scheduler picks up `runnable` runs up to `max_concurrent_runs`.
+5. **Execute** — The engine walks the graph, streaming events to all subscribers.
+6. **Complete** — The run transitions to `succeeded`, `failed`, or `dead`.
+
+## Web UI
+
+The web UI connects to the API server and provides:
+
+* **Runs board** — Monitor all active runs organized by status
+* **Run detail** — Real-time stage progress, event stream, diffs, and usage stats
+* **Files Changed** — Browse changed files with a searchable tree, per-file status, aggregate diff stats, and split or stacked diffs
+* **Settings** — Inspect server configuration, enabled integrations, storage, auth, and capacity settings
+* **Start new run** — Submit workflows from the browser
+* **Human-in-the-loop** — Answer agent questions through the web interface
+* **Workflows** — Browse available workflows, view their graphs, and see run history
+* **Insights** — SQL-based analysis across runs via DuckDB
+
+<Frame caption="The Runs board shows all active runs organized by status.">
+  <img src="https://mintcdn.com/qltysoftware-21b56213/_yTKyxnEAApivGto/images/web/runs-board.png?fit=max&auto=format&n=_yTKyxnEAApivGto&q=85&s=a09a64aa9bd13e2e009ba2cd4c758681" alt="Fabro web UI Runs board with Working, Pending, Verify, and Merge columns" width="2400" height="1558" data-path="images/web/runs-board.png" />
+</Frame>
+
+<Frame caption="The run detail view shows stage progress alongside the workflow graph.">
+  <img src="https://mintcdn.com/qltysoftware-21b56213/CeBrW099_Fr5Vnfo/images/web/run-overview.png?fit=max&auto=format&n=CeBrW099_Fr5Vnfo&q=85&s=3f61f24580a49e95d179a9f2dec1ed13" alt="Fabro web UI run detail showing stages and workflow graph" width="2400" height="1558" data-path="images/web/run-overview.png" />
+</Frame>
+
+## Event streaming
+
+The API streams run events via [Server-Sent Events (SSE)](/api-reference/runs/stream-run-events). Every stage start, LLM call, tool invocation, and edge selection is emitted as a structured JSON event. Any HTTP client that supports SSE can subscribe — the web UI is just one consumer.
+
+## Human-in-the-loop
+
+Human-in-the-loop questions are served over HTTP. The engine blocks the current stage until an answer is submitted, then continues execution. See the [list questions](/api-reference/human-in-the-loop/list-run-questions) and [submit answer](/api-reference/human-in-the-loop/submit-run-answer) API reference pages.
+
+## Authentication
+
+The server configures auth with `server.auth.methods`:
+
+* **`dev-token`** — Operators can call the API directly with `Authorization: Bearer fabro_dev_...`, and the web login page can accept the dev token too.
+* **`github`** — End users sign in through GitHub OAuth and receive a browser session cookie.
+
+Both methods can be enabled simultaneously:
+
+```toml title="settings.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[server.auth]
+methods = ["dev-token", "github"]
+
+[server.auth.github]
+allowed_usernames = ["alice", "bob"]
+```
+
+## Demo mode
+
+Send the `X-Fabro-Demo: 1` header on any API request to get static mock data. To enable demo mode in the web UI, set the `fabro-demo=1` cookie in your browser devtools (Application → Cookies). This lets you explore the UI without API keys or real workflow execution.
+
+## Pointing the CLI at a server
+
+The CLI can target a running Fabro server for commands that support a remote API. Configure `~/.fabro/settings.toml`:
+
+```toml title="settings.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[cli.target]
+type = "http"
+url = "https://fabro.example.com/api/v1"
+```
+
+Or use the `--server` flag:
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+fabro model list --server https://fabro.example.com/api/v1
+```
+
+For dev-token servers, save the token in the CLI auth store instead of exporting it for every command:
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+fabro auth login --server https://fabro.example.com/api/v1 --dev-token fabro_dev_...
+```
+
+`fabro model list` and `fabro model test` honor `[cli.target]` by default unless you explicitly pass `--storage-dir`. `fabro exec` remains a local agent session and only uses the server when you pass `--server`.
+
+See [User Configuration](/reference/user-configuration#cli-target-section) for the full connection options, including client certificates for proxy-terminated HTTPS endpoints.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Deployment" icon="server" href="/administration/deployment">
+    Choose where the server runs: laptop or self-hosted Docker container.
+  </Card>
+
+  <Card title="Server Configuration" icon="gear" href="/administration/server-configuration">
+    Full settings.toml reference — authentication, reverse-proxy TLS, run defaults, and more.
+  </Card>
+
+  <Card title="API Reference" icon="code" href="/api-reference/overview">
+    REST API for submitting runs, streaming events, and managing resources.
+  </Card>
+
+  <Card title="How Fabro Works" icon="lightbulb" href="/core-concepts/how-fabro-works">
+    The workflow engine and architecture.
+  </Card>
+</Columns>

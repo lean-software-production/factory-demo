@@ -1,0 +1,261 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.fabro.sh/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Daytona
+
+> Run Fabro workflows in sandboxed Daytona cloud environments
+
+[Daytona](https://daytona.io) provides cloud-hosted sandbox VMs for Fabro workflows. Each run gets an ephemeral, isolated environment with its own filesystem, network, and compute resources — keeping your host machine clean and giving agents a reproducible workspace.
+
+## What the Daytona integration enables
+
+| Feature                   | How it's used                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Sandboxed execution**   | Agent tool calls (shell commands, file edits, grep, glob) run inside a cloud VM instead of on the host |
+| **Snapshots**             | Pre-built environment images so each run starts with dependencies already installed                    |
+| **SSH access**            | Connect to a running sandbox for live debugging                                                        |
+| **Network controls**      | Restrict agent egress with block-all or CIDR-based allow lists                                         |
+| **MCP sandbox transport** | Run [MCP servers](/agents/mcp#sandbox) inside the sandbox — e.g., Playwright for browser automation    |
+
+## Prerequisites
+
+* A `DAYTONA_API_KEY` saved in the Fabro server vault (get one from [app.daytona.io](https://app.daytona.io))
+* GitHub access configured via the default `token` strategy or a [GitHub App](/integrations/github) (required for private repository cloning and checkpoint pushing)
+
+The Daytona key must include the snapshot and sandbox scopes Fabro uses to create and clean up environments: `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`. Fabro validates these scopes during install, when you run `fabro secret set DAYTONA_API_KEY`, and in `fabro doctor`.
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+fabro secret set DAYTONA_API_KEY <key>
+```
+
+The Fabro server runtime reads the Daytona API key from the vault only. It does not read `DAYTONA_API_KEY` from process env or `server.env`; non-secret Daytona settings such as API URL or organization ID remain normal configuration.
+
+## Configuration
+
+Select a Daytona environment in your run config TOML or via CLI flag:
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+fabro run workflow.fabro --environment cloud
+```
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
+provider = "daytona"
+```
+
+A full configuration example with all Daytona-specific options:
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
+provider = "daytona"
+
+[environments.cloud.lifecycle]
+preserve = false
+auto_stop = "60m"
+
+[environments.cloud.labels]
+project = "fabro"
+env = "staging"
+team = "platform"
+
+<Note>
+Fabro also adds reserved labels to every managed Daytona sandbox:
+`sh.fabro.managed=true` and, when available, `sh.fabro.run_id=<run-id>`.
+These match Docker sandbox labels and are useful for filtering provider resources
+back to Fabro-managed runs. User-provided values for these reserved keys are
+overwritten.
+</Note>
+
+[environments.cloud.image]
+docker = "rust:1.85-slim-bookworm"
+# Or replace docker with an inline or path-based Dockerfile:
+# dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get install -y git ripgrep"
+# dockerfile = { path = "./Dockerfile" }
+
+[environments.cloud.resources]
+cpu = 4
+memory = "8GB"
+disk = "20GB"
+```
+
+See [Environments](/execution/environments) for the full reference on all environment fields and server defaults.
+
+### Network access control
+
+Control outbound network access with the `network` field. Three modes are available:
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+# Full access (default)
+[environments.cloud.network]
+mode = "allow_all"
+
+# Block all egress
+[environments.cloud.network]
+mode = "block"
+
+# CIDR-based allow list
+[environments.cloud.network]
+mode = "cidr_allow_list"
+allow = ["208.80.154.232/32", "10.0.0.0/8"]
+```
+
+Use `"block"` or a CIDR allow list when running untrusted or generated code to prevent agents from making arbitrary network requests.
+
+## Snapshots
+
+Snapshots let you pre-build an environment image so each run starts with dependencies already installed rather than installing them in setup commands every time.
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[environments.cloud.image]
+docker = "node:20-slim"
+
+[environments.cloud.resources]
+cpu = 4
+memory = 8
+disk = 20
+```
+
+Set either `image.docker` or `image.dockerfile`. `image.docker` can name any image that Daytona can pull, so a Dockerfile is not required. Use `image.dockerfile` when the image needs extra packages or other build steps:
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[environments.cloud.image]
+dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
+```
+
+Fabro computes an internal snapshot name and looks up that snapshot in Daytona. If it does not exist, Fabro creates it automatically and polls until it reaches `Active` state for up to 30 minutes. A Dockerfile can be inline content or `{ path = "..." }`; paths are resolved relative to the TOML file that declares them and are bundled into run manifests. If the snapshot already exists, Fabro reuses it immediately.
+
+The exact `image.docker` value is part of the snapshot identity. Prefer a digest such as `registry.example.com/team/image@sha256:...` when the image must be reproducible. If a mutable tag moves without its text changing, Fabro continues to reuse the existing snapshot.
+
+<Note>
+  If neither image source is configured, sandboxes are created from the `daytona-medium` snapshot, which includes standard dev tools such as Git. To force a new Dockerfile snapshot, change the Dockerfile text, for example by adding a comment.
+</Note>
+
+## Private repositories
+
+Fabro automatically clones the run's GitHub origin into the sandbox at `/home/daytona/workspace`. Public repositories work without extra configuration. Private repositories require GitHub access. In `token` mode, Fabro uses the stored token directly. In `app` mode, Fabro uses short-lived Installation Access Tokens scoped to the specific repository.
+
+Set `[run.clone] enabled = false` when a workflow should start with an empty Daytona workspace instead of cloning the run origin:
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
+provider = "daytona"
+
+[run.clone]
+enabled = false
+```
+
+Daytona clones 100 commits by default. To keep only the newest commit, set a smaller clone depth:
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[run.clone]
+depth = 1
+```
+
+Set `depth = 0` to clone the full repository history.
+
+If the clone fails without GitHub access configured, Fabro suggests running the setup flow:
+
+```
+Git clone failed: ... If this is a private repository,
+run `gh auth login` or `fabro install` to configure GitHub access.
+```
+
+## SSH access
+
+Connect to a running Daytona sandbox via SSH for live debugging:
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+fabro sandbox ssh <run-id>
+```
+
+This creates temporary SSH credentials (valid for 60 minutes) and connects directly. Use `--print` to print the SSH command instead of connecting, or `--ttl` to set the credential expiry.
+
+<Note>
+  To keep the sandbox alive after the run completes, pass `--preserve-sandbox` to `fabro run`.
+</Note>
+
+## Sandbox lifecycle
+
+Each sandbox gets a unique timestamped name (e.g. `fabro-20260307-143022-a3f2`) and is created as ephemeral. By default, sandboxes are destroyed when the run finishes.
+
+### Preservation
+
+To keep a sandbox alive for debugging:
+
+```bash theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+fabro run workflow.fabro --environment cloud --preserve-sandbox
+```
+
+Or in the run config:
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
+provider = "daytona"
+
+[environments.cloud.lifecycle]
+preserve = true
+```
+
+When preserved, Fabro prints the sandbox name so you can find it in the [Daytona dashboard](https://app.daytona.io/dashboard/sandboxes).
+
+### Auto-stop
+
+The `lifecycle.auto_stop` setting tells Daytona to stop the sandbox after a period of inactivity, saving costs for preserved or long-running sandboxes:
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[environments.cloud.lifecycle]
+auto_stop = "30m"
+```
+
+When `auto_stop` is unset, Fabro applies a default of 120 minutes so a sandbox leaked by an interrupted run is still reclaimed. Set `auto_stop = "0s"` to disable auto-stop and let the sandbox run indefinitely.
+
+Daytona counts inactivity from the last sandbox interaction (a command, file operation, or other API call). Time an agent spends on LLM inference does not touch the sandbox, so intervals shorter than your longest inference call risk stopping the sandbox mid-run.
+
+## Server defaults
+
+When running via `fabro server start`, the server config at `~/.fabro/settings.toml` can set default Daytona settings for all runs. Run config TOML values override server defaults. Labels are **merged** — run config labels win on key collisions. The `network` setting uses simple override (run config replaces the server default entirely).
+
+See [Server Configuration](/administration/server-configuration) for details.
+
+## Troubleshooting
+
+### "Failed to create Daytona sandbox"
+
+The `DAYTONA_API_KEY` vault secret is missing, invalid, or missing the required snapshot/sandbox scopes. Store it with `fabro secret set DAYTONA_API_KEY ...`, then run `fabro doctor` to verify that Daytona reports the key as valid.
+
+If doctor reports missing scopes, regenerate the Daytona key with `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`, then save it again with `fabro secret set DAYTONA_API_KEY`.
+
+### Custom snapshot did not roll
+
+Custom Daytona snapshot names are computed from the image reference or Dockerfile, resource hints, tenant scope, and Daytona API key. For `image.docker`, use an immutable digest and update it when the image changes. For `image.dockerfile`, change the Dockerfile text under the selected `[environments.<slug>.image]`.
+
+### "Timed out waiting for snapshot to become active"
+
+Snapshot creation took longer than 30 minutes. This can happen with large Dockerfiles. Check the snapshot status in the Daytona dashboard — it may still be building. Subsequent runs will reuse the snapshot once it's active.
+
+### Git clone fails for private repositories
+
+See [Private repositories](#private-repositories) above. You need a GitHub App configured and installed on the repository's organization or account.
+
+### Stall watchdog kills the run
+
+Long-running commands in Daytona sandboxes may trigger the 1800-second stall watchdog if they don't produce events. For workflows with long-running operations, increase the `stall_timeout` in the workflow graph:
+
+```dot theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+digraph Example {
+    graph [stall_timeout="1200"]
+}
+```

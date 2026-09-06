@@ -1,0 +1,297 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.fabro.sh/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Outputs & Artifacts
+
+> How Fabro captures agent responses, tracks file changes, and collects test assets
+
+When an agent or prompt node finishes, Fabro captures its response text and produces an **outcome** that feeds into context, transition logic, and downstream nodes. Fabro also tracks every file change per stage, offloads large outputs into content-addressed blob storage, and can collect configured artifacts such as screenshots and reports.
+
+## Response capture
+
+After an agent or prompt node completes, Fabro captures the full response text and persists it to `stages/{rank:03}-{node_id}@{visit}/response.md` in metadata snapshots and `fabro dump` output. It also writes the final outcome (status, context updates, routing directives) to `stages/{rank:03}-{node_id}@{visit}/status.json`.
+
+## Context updates
+
+Every agent and prompt node sets three context keys from its response:
+
+| Key                  | Value                                                    |
+| -------------------- | -------------------------------------------------------- |
+| `last_stage`         | The node ID of the stage that just completed             |
+| `last_response`      | The response text, truncated to the first 200 characters |
+| `response.{node_id}` | The full response text                                   |
+
+These keys are available to downstream nodes via the [context](/execution/context). The `last_response` key provides a quick preview, while `response.{node_id}` preserves the complete output for nodes that need it.
+
+```dot theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+plan -> implement -> review -> exit
+
+// In the review node's prompt, you can reference prior outputs:
+// The context key response.plan contains the full plan text
+// The context key response.implement contains the full implementation
+```
+
+## Routing directives
+
+Agent and prompt nodes can influence which edge is taken after they complete by including a JSON object with routing fields in their response. Fabro scans the LLM output for the **last** JSON object containing any recognized routing field:
+
+```json theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+{
+  "outcome": "failed",
+  "failure_reason": "tests failed",
+  "preferred_next_label": "fix",
+  "suggested_next_ids": ["implement", "review"],
+  "context_updates": { "tests_passed": true, "coverage": 85 }
+}
+```
+
+| Field                  | Effect                                                                            |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `outcome`              | Sets the node outcome: `succeeded`, `failed`, `partially_succeeded`, or `skipped` |
+| `failure_reason`       | When `outcome` is `failed`, provides a structured failure message                 |
+| `preferred_next_label` | Matched against edge labels to select the next node                               |
+| `suggested_next_ids`   | Ordered list of preferred target node IDs                                         |
+| `context_updates`      | Key-value pairs merged into the run context                                       |
+
+### How extraction works
+
+Fabro finds all balanced `{...}` JSON objects in the response text, parses each one, and uses the **last** object that contains at least one recognized field (`preferred_next_label`, `outcome`, `failure_reason`, `suggested_next_ids`, `context_updates`). The JSON can appear anywhere in the response -- inside a fenced code block, inline with natural language, or at the end.
+
+```markdown theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+I've reviewed the code and found several issues that need fixing.
+The test coverage is below the threshold.
+
+{"preferred_next_label": "fix", "context_updates": {"coverage": 72}}
+```
+
+JSON objects without recognized fields are ignored.
+
+### Validated routing output
+
+Set `output_schema="routing"` on an agent, prompt, or command node to require Fabro's built-in routing directive schema:
+
+```dot theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+review [
+  shape=tab,
+  prompt="Review the implementation and return routing JSON.",
+  output_schema="routing",
+  output_retries=2
+]
+```
+
+With `output_schema="routing"`, the routing JSON must be an object with at least one recognized routing field (`preferred_next_label`, `outcome`, `failure_reason`, `suggested_next_ids`, or `context_updates`) and those fields must have the expected types. Malformed routing JSON fails validation instead of being silently ignored.
+
+Validated routing uses the same reverse scan as normal routing extraction: Fabro validates the last parsable JSON object that contains a recognized routing field. If a routing object is present but malformed or has invalid field types, Fabro repairs that response instead of falling through to a file fallback.
+
+Fabro repairs invalid structured output inside the same LLM context before failing an agent or prompt node. For prompt nodes, Fabro appends the invalid assistant response and a corrective user message to the same message list. For agent nodes using the API backend, Fabro sends the corrective message to the same live agent session. `output_retries` controls these repair turns and defaults to `2`; `output_retries=0` validates once and fails without a repair turn. Negative values are treated as `0`. These repair turns are separate from workflow `max_retries` and do not consume node retry attempts.
+
+Command nodes instead validate only after an exit-code-`0` script, applying the same reverse scan to merged stdout and stderr. Print the intended JSON object last. Invalid output fails deterministically without a repair turn, command retry, or `status.json` fallback; `output_retries`, `retry_policy`, and `max_retries` do not retry the validation failure. Nonzero exits keep their normal command failure behavior without schema validation.
+
+### Routing fallback sources
+
+Agent nodes can provide routing directives through fallback files. Fabro checks sources in this order:
+
+| Order | Source                                         |
+| ----- | ---------------------------------------------- |
+| 1     | The final response text                        |
+| 2     | `status.json` in the sandbox working directory |
+| 3     | The last file touched by the agent             |
+
+This fallback chain applies to normal routing extraction and to `output_schema="routing"`. For validated routing, Fabro only advances to the next source when the current source has no JSON object or no object with recognized routing fields. If the current source contains malformed routing JSON or valid JSON with wrong routing field types, validation fails and Fabro starts the repair loop instead.
+
+The last-file fallback only reads `.json` and `.md` files (case-insensitive), and the routing JSON must be the final JSON object in the file, with only whitespace after it. Fabro ignores other file types and routing JSON followed by any other content. These restrictions do not apply to the dedicated `status.json` fallback.
+
+Prompt nodes do not use file fallbacks; they validate or extract routing directives from the response text only. Command nodes likewise have no file fallback and validate only their merged stdout and stderr.
+
+If no source provides routing directives, the transition falls through to condition matching, unconditional edges, or weight-based tiebreaking as described in [Transitions](/workflows/transitions).
+
+### Instructing the agent
+
+Fabro does not automatically instruct agents to emit routing JSON. You must include instructions in your prompt:
+
+```dot theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+review [
+    label="Review",
+    shape=tab,
+    prompt="Review the implementation. If changes are needed, \
+        respond with: {\"preferred_next_label\": \"fix\"}. \
+        If everything looks good, respond with: \
+        {\"preferred_next_label\": \"approve\"}."
+]
+
+review -> fix     [label="Fix"]
+review -> approve [label="Approve"]
+```
+
+## Custom structured outputs
+
+Agent, prompt, and command nodes can also validate their final JSON object against a JSON Schema file:
+
+```dot theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+audit [
+  shape=tab,
+  prompt="Audit the change and return JSON that matches the schema.",
+  output_schema="@schemas/audit-result.schema.json",
+  output_retries=2
+]
+```
+
+`output_schema="@path/to/schema.json"` uses the same workflow file-reference rules as prompt files: the schema is loaded relative to the workflow file and inlined before execution. The final JSON object in the LLM response, or in a successful command's merged stdout and stderr, is validated with `jsonschema`.
+
+For API-backed agent nodes, Fabro adds the resolved output contract to the task instructions. The contract applies only to the final response. It does not restrict intermediate tool calls or progress messages.
+
+Custom schema validation only reads response or command output text. It does not fall back to `status.json` or the last file touched by the agent.
+
+When custom schema validation succeeds, Fabro stores the parsed JSON value in context at:
+
+| Key                | Value                                                 |
+| ------------------ | ----------------------------------------------------- |
+| `output.{node_id}` | The parsed JSON object that matched the custom schema |
+
+For example, node `audit` writes its parsed custom output to `output.audit`. Fabro still stores raw LLM response text at `response.audit`; command output remains available through `command.output`.
+
+If custom schema validation fails for an agent or prompt node, Fabro sends concise validation feedback to the same prompt conversation or agent session and asks for corrected JSON. After `output_retries` repair turns are exhausted, the node fails terminally with `output schema validation failed after N repair attempt(s)`. A command node instead fails deterministically after its first validation, without a repair turn or command retry.
+
+<Note>
+  Structured output validation applies to agent, prompt, and command nodes. `backend="acp"` does not support `output_schema` in this release. Custom schemas update `output.{node_id}`; routing schemas update routing fields and merge `context_updates` as flat context keys that edge conditions can read. Edge conditions cannot traverse the custom `output.{node_id}` object.
+</Note>
+
+## Output logging
+
+Fabro writes several files per stage to `stages/{rank:03}-{node_id}@{visit}/` in metadata snapshots and `fabro dump` output:
+
+| File          | Contents                                                              |
+| ------------- | --------------------------------------------------------------------- |
+| `prompt.md`   | The assembled prompt (preamble + expanded prompt text)                |
+| `response.md` | The full LLM response text                                            |
+| `status.json` | The outcome: status, context updates, routing directives, usage stats |
+
+These files are written for every agent and prompt node execution, including retries. Use them for debugging unexpected agent behavior or verifying that routing directives were extracted correctly.
+
+## File tracking
+
+Fabro records which files each stage touches. When an agent calls `write_file` or `edit_file`, Fabro tracks the file path. When using a CLI-based agent backend, Fabro snapshots the Git working tree before and after execution and diffs the results.
+
+The tracked paths are stored as `files_touched` on the stage outcome:
+
+```json theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+{
+  "status": "succeeded",
+  "files_touched": ["src/main.rs", "tests/api_test.rs", "README.md"]
+}
+```
+
+### Where files\_touched appears
+
+| Location               | How it's used                                                                                            |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `StageCompleted` event | Emitted with `files_touched` in the event stream and surfaced by `fabro events` / exported event streams |
+| Preambles              | Listed under each completed stage so downstream agents know what changed                                 |
+| `status.json`          | Written to the stage's logs directory after each node completes                                          |
+
+### How tracking works
+
+For the **API backend**, Fabro subscribes to agent session events. When a `ToolCallStarted` event fires for `write_file` or `edit_file`, Fabro records the `file_path` argument as pending. When the corresponding `ToolCallCompleted` arrives without an error, the path is confirmed as touched. Failed tool calls are discarded.
+
+For the **CLI** and **ACP** backends, Fabro takes a different approach: it runs `git diff --name-only` and `git ls-files --others --exclude-standard` before and after the external agent session, then computes the difference. Any files that appear in the "after" snapshot but not "before" are recorded as touched.
+
+## Artifact offloading
+
+When a stage produces a large context value -- an LLM response or any context update -- Fabro automatically offloads it into a global content-addressed blob store instead of leaving the full value inline in durable context. Command output is streamed to a stage log file while the command runs, then finalized into a durable blob ref after completion.
+
+### How offloading works
+
+After each node completes, Fabro checks every context update. If the serialized JSON of a value exceeds **100KB**, it is stored once by SHA-256 hash and replaced with a durable blob ref. Command output is always stored this way after completion, even when it is small or empty:
+
+```
+response.plan  -->  blob://sha256/2cf24dba5fb0...
+command.output -->  blob://sha256/a4f3c1d9c2e1...
+```
+
+Non-command values under 100KB remain inline.
+
+Checkpoints, checkpoint-completed events, forks, and resumes persist these `blob://` refs, not host-specific file paths.
+
+### Preamble rendering
+
+When Fabro builds a [preamble](/execution/context#preamble-construction) for a downstream stage, it first materializes any blob refs into execution-local files and then renders a reference instead of inlining the full content:
+
+```markdown theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+## Completed stages
+- **plan**: success
+  - Model: claude-sonnet-4-5, 12.4k tokens in / 3.2k out
+  - Files: src/main.rs, tests/api_test.rs
+  - Response: See: /path/to/runtime/blobs/<blob_hash>.json
+- **test**: success
+  - Script: `cargo test 2>&1 || true`
+  - Stdout: See: /path/to/runtime/blobs/<blob_hash>.json
+```
+
+This keeps preambles concise while still giving agents a path to read the full output if needed.
+
+## Git storage
+
+Large offloaded context values are not stored on the Git [metadata branch](/execution/checkpoints#metadata-branch). The metadata branch keeps checkpoint JSON and stage metadata; blob payloads live in the durable blob store and are referenced by `blob://sha256/...`.
+
+Captured stage artifacts such as screenshots, videos, reports, and traces still use the artifact store and metadata export paths described below.
+
+## Remote sandbox syncing
+
+For remote sandboxes (Docker, Daytona), execution-time file access happens inside the sandbox filesystem.
+
+* Blob refs are materialized into the sandbox runtime directory, `{runtime_directory}/blobs/{blob_hash}.json`. This directory lives outside the repository checkout, so materialized blobs never show up in `git status` or in checkpoint commits.
+* Explicit non-blob `file://` refs keep the existing copy-on-demand behavior and are copied into `{working_directory}/.fabro/artifacts/{filename}` when needed
+
+In both cases, downstream handlers and agents continue to consume ordinary `file://` pointers during execution.
+
+<Note>
+  For local sandboxes, syncing is a no-op since the agent can already access the host filesystem directly.
+</Note>
+
+## Automatic asset capture
+
+When `[run.artifacts]` contains include patterns, Fabro scans the sandbox after each stage and captures matching files. Artifact collection is opt-in; no scan runs when the include list is empty.
+
+### How asset capture works
+
+1. Fabro compiles and validates the configured workspace-relative globs.
+2. The sandbox provider enumerates regular files and their sizes without recursing through symlinks below the workspace root.
+3. Fabro applies the globs to normalized relative paths, enforces its collection limits, and downloads the selected files.
+
+Each scan represents the post-stage workspace state; Fabro does not depend on filesystem modification timestamps. The same path and content hash is recorded only once per run, even when it still matches after later stages. Individual files over 10 MB are skipped, and each collection is limited to 100 files and 50 MB total.
+
+### What gets captured
+
+Configure the paths your workflow produces:
+
+```toml title="run.toml" theme={"languages":{"custom":["/languages/dot.json","/languages/fabro.json"]}}
+[run.artifacts]
+include = [
+  "test-results/**",
+  "playwright-report/**",
+  "**/*.trace.zip",
+  ".ai/reports/*.md",
+  ".ai/plans/????-??-??-*.md",
+]
+```
+
+Patterns are rooted at the sandbox working directory. `*` and `?` stay within one path segment, while `**` crosses directories. See [`[run.artifacts]`](/execution/run-configuration#runartifacts) for the complete matching contract.
+
+Fabro prunes dependency, cache, and build directories including `.git`, `node_modules`, `target`, `.venv`, `.cache`, and `dist`.
+
+### Browse and download captures
+
+The Artifacts page groups captures by file path. Expand a file to see and download earlier versions. **Download all** creates a ZIP archive with the latest captured version of each path. Fabro uses stage order, retry number, and stage ID to choose the latest version, and it excludes captures from the graph's start and exit nodes.
+
+## Observability
+
+Outputs and artifacts appear in several observability surfaces:
+
+| Surface                                               | What's reported                                                                                 |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `StageCompleted` event                                | `files_touched` list for the stage                                                              |
+| `WorkflowRunCompleted` event                          | `artifact_count` -- total number of offloaded artifacts across the run                          |
+| Web UI                                                | Run stage output, artifact version history, individual downloads, and a ZIP of the latest files |
+| [Preambles](/execution/context#preamble-construction) | File list and artifact pointer references for completed stages                                  |
+| Stage logs                                            | `status.json` in each stage's run directory contains the full outcome including `files_touched` |

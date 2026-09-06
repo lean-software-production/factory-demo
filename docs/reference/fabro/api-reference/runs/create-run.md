@@ -1,0 +1,1549 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.fabro.sh/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Create Run
+
+> Creates a new workflow run in `submitted` status from either a self-contained legacy manifest or an immutable workflow-version intent. Creation does not start or schedule the run.
+
+Failures return the standard error body. The intent lane responds `404` (`workflow_version_not_found`, `environment_not_found`), `422` (`run_intent_invalid`, `target_invalid`, `target_environment_unsupported`, `pull_request_environment_unsupported`, `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500` (`workflow_version_store_error`, `credential_store_error`, `variable_store_error`, `run_persistence_failed`).
+
+
+
+## OpenAPI
+
+````yaml /api-reference/fabro-api.yaml post /api/v1/runs
+openapi: 3.1.0
+info:
+  title: Fabro Run API
+  version: 0.2.0
+  description: HTTP API for managing Fabro workflow run executions.
+servers: []
+security:
+  - BearerAuth: []
+  - SessionCookie: []
+tags:
+  - name: Discovery
+    description: API discovery and health
+  - name: Install
+    description: First-run browser install workflow
+  - name: Integrations
+    description: External provider callbacks and integration endpoints
+  - name: Auth
+    description: Browser authentication
+  - name: Runs
+    description: Run management operations
+  - name: Automations
+    description: Server-managed automation definitions and automation-triggered runs
+  - name: Environments
+    description: Server-managed execution environment catalog
+  - name: MCP Servers
+    description: >-
+      Server-managed MCP server definitions referenced by id from workflow
+      configs
+  - name: Sandboxes
+    description: Provider-backed sandbox inventory
+  - name: Sessions
+    description: Ask Fabro sessions bound to runs
+  - name: Human-in-the-Loop
+    description: Questions, answers, and steering for runs
+  - name: Run Outputs
+    description: Files produced by runs
+  - name: Run Internals
+    description: Internal run details (stages, turns, context, configuration)
+  - name: Workflows
+    description: Workflow definitions and execution
+  - name: Workflow Versions
+    description: Immutable, content-addressed workflow packages
+  - name: Billing
+    description: Token counts and billed totals
+  - name: Insights
+    description: SQL query editor and history
+  - name: Models
+    description: Available LLM models
+  - name: Completions
+    description: Single-turn LLM completions
+  - name: Settings
+    description: Platform configuration
+  - name: System
+    description: Server runtime, maintenance, and event streaming
+paths:
+  /api/v1/runs:
+    post:
+      tags:
+        - Runs
+      summary: Create Run
+      description: >-
+        Creates a new workflow run in `submitted` status from either a
+        self-contained legacy manifest or an immutable workflow-version intent.
+        Creation does not start or schedule the run.
+
+
+        Failures return the standard error body. The intent lane responds `404`
+        (`workflow_version_not_found`, `environment_not_found`), `422`
+        (`run_intent_invalid`, `target_invalid`,
+        `target_environment_unsupported`,
+        `pull_request_environment_unsupported`, `workflow_version_unusable`,
+        `run_compile_invalid`), `503` (`integration_unavailable`), or `500`
+        (`workflow_version_store_error`, `credential_store_error`,
+        `variable_store_error`, `run_persistence_failed`).
+      operationId: createRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '201':
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+        '400':
+          description: Invalid JSON or legacy manifest
+          headers:
+            x-request-id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    CreateRunRequest:
+      description: >-
+        Transitional create body used while callers migrate independently from
+        self-contained manifests to immutable workflow-version intents.
+      oneOf:
+        - $ref: '#/components/schemas/RunManifest'
+        - $ref: '#/components/schemas/RunIntent'
+    Run:
+      description: Canonical public run shape.
+      type: object
+      required:
+        - id
+        - title
+        - goal
+        - workflow
+        - automation
+        - repository
+        - created_by
+        - origin
+        - labels
+        - lifecycle
+        - sandbox
+        - models
+        - source_directory
+        - timestamps
+        - timing
+        - billing
+        - size
+        - ask_fabro
+        - diff
+        - pull_request
+        - current_question
+        - superseded_by
+        - retried_from
+        - links
+        - children_count
+      properties:
+        id:
+          type: string
+        parent_id:
+          type:
+            - string
+            - 'null'
+          description: Current orchestration parent run ID, if linked.
+        children_count:
+          type: integer
+          format: uint64
+          minimum: 0
+          description: >-
+            Number of runs currently linked to this run as their orchestration
+            parent.
+        title:
+          type: string
+        goal:
+          type: string
+        workflow:
+          $ref: '#/components/schemas/WorkflowRef'
+        automation:
+          oneOf:
+            - $ref: '#/components/schemas/AutomationRef'
+            - type: 'null'
+        repository:
+          oneOf:
+            - $ref: '#/components/schemas/RepositoryRef'
+            - type: 'null'
+        created_by:
+          $ref: '#/components/schemas/Principal'
+        origin:
+          $ref: '#/components/schemas/RunOrigin'
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        lifecycle:
+          $ref: '#/components/schemas/RunLifecycle'
+        sandbox:
+          oneOf:
+            - $ref: '#/components/schemas/RunSandbox'
+            - type: 'null'
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunModel'
+        source_directory:
+          type:
+            - string
+            - 'null'
+        timestamps:
+          $ref: '#/components/schemas/RunTimestamps'
+        timing:
+          oneOf:
+            - $ref: '#/components/schemas/RunTiming'
+            - type: 'null'
+          description: |
+            Run-level timing rollup. Wall time is the run's clock duration;
+            active timing sums work across stage visits.
+        billing:
+          oneOf:
+            - $ref: '#/components/schemas/RunBillingSummary'
+            - type: 'null'
+        size:
+          $ref: '#/components/schemas/RunSize'
+        ask_fabro:
+          $ref: '#/components/schemas/AskFabro'
+        diff:
+          oneOf:
+            - $ref: '#/components/schemas/DiffSummary'
+            - type: 'null'
+        pull_request:
+          oneOf:
+            - $ref: '#/components/schemas/PullRequestLink'
+            - type: 'null'
+        current_question:
+          oneOf:
+            - $ref: '#/components/schemas/RunQuestion'
+            - type: 'null'
+        superseded_by:
+          type:
+            - string
+            - 'null'
+          description: Run ID that superseded this run via rewind, if any.
+        retried_from:
+          type:
+            - string
+            - 'null'
+          description: Source run ID when this run was created by manual retry.
+        links:
+          $ref: '#/components/schemas/RunLinks'
+    ErrorResponse:
+      description: Standard error response containing one or more error entries.
+      type: object
+      required:
+        - errors
+      properties:
+        errors:
+          type: array
+          description: List of error entries.
+          items:
+            $ref: '#/components/schemas/ErrorResponseEntry'
+        request_id:
+          type: string
+          format: uuid
+          description: >-
+            Server-generated request identifier; matches the x-request-id
+            response header.
+        leftover_env_keys:
+          type: array
+          description: >-
+            Optional list of runtime env keys that were written before an
+            install failure. Currently populated by `POST /install/finish`
+            failure responses only.
+          items:
+            type: string
+        removed_env_keys:
+          type: array
+          description: >-
+            Optional list of runtime env keys that were actually removed before
+            an install failure. Currently populated by `POST /install/finish`
+            failure responses only.
+          items:
+            type: string
+    RunManifest:
+      description: Self-contained workflow run manifest.
+      type: object
+      required:
+        - version
+        - cwd
+        - target
+        - workflows
+      properties:
+        version:
+          type: integer
+          description: Manifest schema version.
+          example: 1
+        parent_id:
+          type:
+            - string
+            - 'null'
+          description: >-
+            Optional orchestration parent run ID. Fork and rewind lineage use
+            separate fields and should not set this value.
+          example: 01HV6D7S5YF4Z4B2M7K4N0Q6T8
+        title:
+          type:
+            - string
+            - 'null'
+          maxLength: 100
+          description: >-
+            Optional explicit run title. The server trims leading/trailing
+            whitespace, rejects blank values, rejects control characters and
+            newline characters, and requires at most 100 characters.
+          example: Add rate limiting to auth endpoints
+        cwd:
+          type: string
+          description: CLI working directory at invocation time.
+          example: /tmp/project
+        git:
+          $ref: '#/components/schemas/GitContext'
+        goal:
+          $ref: '#/components/schemas/ManifestGoal'
+        args:
+          $ref: '#/components/schemas/ManifestArgs'
+        target:
+          $ref: '#/components/schemas/ManifestTarget'
+        configs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManifestConfig'
+        workflows:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ManifestWorkflow'
+    RunIntent:
+      description: >-
+        A request to create, but not start, one run from an immutable workflow
+        version and an explicit workspace target.
+      type: object
+      additionalProperties: false
+      required:
+        - workflow_version_id
+        - target
+        - args
+      properties:
+        workflow_version_id:
+          $ref: '#/components/schemas/WorkflowVersionId'
+        target:
+          $ref: '#/components/schemas/RunTarget'
+        args:
+          $ref: '#/components/schemas/RunIntentArgs'
+        environment_id:
+          type: string
+          description: Server environment catalog ID. Omission selects `default`.
+        parent_id:
+          type: string
+          description: Optional orchestration parent run ID.
+        title:
+          type: string
+          maxLength: 100
+          description: Optional explicit run title, normalized by the server.
+        goal:
+          type: string
+          description: Optional inline goal override.
+    WorkflowRef:
+      type: object
+      required:
+        - slug
+        - name
+        - graph_name
+        - node_count
+        - edge_count
+      properties:
+        slug:
+          type:
+            - string
+            - 'null'
+        name:
+          type:
+            - string
+            - 'null'
+        graph_name:
+          type:
+            - string
+            - 'null'
+        node_count:
+          type: integer
+          format: int64
+          description: Number of nodes in the workflow graph.
+        edge_count:
+          type: integer
+          format: int64
+          description: Number of edges in the workflow graph.
+    AutomationRef:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type:
+            - string
+            - 'null'
+        trigger_id:
+          type:
+            - string
+            - 'null'
+        workflow_source:
+          description: Resolved workflow source for automation runs that declare one.
+          oneOf:
+            - $ref: '#/components/schemas/ResolvedAutomationGitWorkflowSource'
+            - type: 'null'
+    RepositoryRef:
+      description: Durable repository metadata for a run.
+      type: object
+      required:
+        - name
+        - origin_url
+        - provider
+      properties:
+        name:
+          type: string
+          example: fabro-sh/fabro
+        origin_url:
+          type:
+            - string
+            - 'null'
+          example: https://github.com/fabro-sh/fabro.git
+        provider:
+          type: string
+          enum:
+            - github
+            - git
+            - unknown
+    Principal:
+      oneOf:
+        - $ref: '#/components/schemas/PrincipalUser'
+        - $ref: '#/components/schemas/PrincipalWorker'
+        - $ref: '#/components/schemas/PrincipalWebhook'
+        - $ref: '#/components/schemas/PrincipalSlack'
+        - $ref: '#/components/schemas/PrincipalAgent'
+        - $ref: '#/components/schemas/PrincipalSystem'
+      discriminator:
+        propertyName: kind
+        mapping:
+          user:
+            $ref: '#/components/schemas/PrincipalUser'
+          worker:
+            $ref: '#/components/schemas/PrincipalWorker'
+          webhook:
+            $ref: '#/components/schemas/PrincipalWebhook'
+          slack:
+            $ref: '#/components/schemas/PrincipalSlack'
+          agent:
+            $ref: '#/components/schemas/PrincipalAgent'
+          system:
+            $ref: '#/components/schemas/PrincipalSystem'
+    RunOrigin:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - api
+    RunLifecycle:
+      type: object
+      required:
+        - status
+        - approval
+        - pending_control
+        - queue_position
+        - error
+        - archived
+        - archived_at
+      properties:
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        approval:
+          oneOf:
+            - $ref: '#/components/schemas/RunApproval'
+            - type: 'null'
+        pending_control:
+          oneOf:
+            - $ref: '#/components/schemas/RunControlAction'
+            - type: 'null'
+        queue_position:
+          type:
+            - integer
+            - 'null'
+        error:
+          oneOf:
+            - $ref: '#/components/schemas/RunError'
+            - type: 'null'
+        archived:
+          type: boolean
+        archived_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    RunSandbox:
+      description: >-
+        Sandbox lifecycle record for a run. A run can have a requested sandbox
+        plan before it has an initialized sandbox instance.
+      type: object
+      required:
+        - kind
+        - plan
+      properties:
+        kind:
+          $ref: '#/components/schemas/RunSandboxKind'
+        plan:
+          $ref: '#/components/schemas/RunSandboxPlan'
+        instance:
+          oneOf:
+            - $ref: '#/components/schemas/RunSandboxInstance'
+            - type: 'null'
+          description: Present only when `kind` is `ready`.
+        failure:
+          oneOf:
+            - $ref: '#/components/schemas/RunSandboxFailure'
+            - type: 'null'
+          description: Present only when `kind` is `failed`.
+    RunModel:
+      type: object
+      required:
+        - provider
+        - name
+      properties:
+        provider:
+          type:
+            - string
+            - 'null'
+        name:
+          type: string
+    RunTimestamps:
+      type: object
+      required:
+        - created_at
+        - started_at
+        - last_event_at
+        - completed_at
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        last_event_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        completed_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    RunTiming:
+      description: |
+        Timing rollup for an entire run. Active fields sum work across stage
+        visits, so `active_time_ms` can exceed `wall_time_ms` when parallel
+        branches run concurrently.
+
+        For a running run, stages still in flight contribute a live estimate
+        rather than nothing, so wall and active both advance continuously.
+        Unlike `StageTiming`, active is not clamped to wall here — concurrent
+        branches can legitimately sum past run wall time.
+      type: object
+      required:
+        - wall_time_ms
+        - inference_time_ms
+        - tool_time_ms
+        - active_time_ms
+      properties:
+        wall_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          example: 420000
+        inference_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          default: 0
+          example: 120000
+        tool_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          default: 0
+          example: 60000
+        active_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          description: Equals `inference_time_ms + tool_time_ms`.
+          example: 180000
+    RunBillingSummary:
+      type: object
+      required:
+        - total_usd_micros
+      properties:
+        total_usd_micros:
+          type:
+            - integer
+            - 'null'
+          format: int64
+    RunSize:
+      type: string
+      enum:
+        - XS
+        - S
+        - M
+        - L
+        - XL
+      description: Run size bucket derived from current best-effort billed usage.
+    AskFabro:
+      description: Readiness and defaults for starting an Ask Fabro session on this run.
+      type: object
+      required:
+        - available
+        - unavailable_reason
+        - default_model
+      properties:
+        available:
+          type: boolean
+        unavailable_reason:
+          type:
+            - string
+            - 'null'
+          enum:
+            - no_sandbox
+            - sandbox_not_ready
+            - llm_unconfigured
+            - null
+        default_model:
+          type:
+            - string
+            - 'null'
+    DiffSummary:
+      description: Cheap aggregate file and line counts for a run diff.
+      type: object
+      required:
+        - files_changed
+        - additions
+        - deletions
+      properties:
+        files_changed:
+          type: integer
+          description: Total number of changed files, including binary files.
+          example: 42
+        additions:
+          type: integer
+          description: Total lines added across text files.
+          example: 567
+        deletions:
+          type: integer
+          description: Total lines deleted across text files.
+          example: 234
+    PullRequestLink:
+      description: Minimal GitHub pull request link associated with a run.
+      type: object
+      required:
+        - owner
+        - repo
+        - number
+        - html_url
+      properties:
+        owner:
+          type: string
+          example: fabro-sh
+        repo:
+          type: string
+          example: fabro
+        number:
+          type: integer
+          example: 123
+        html_url:
+          type: string
+          format: uri
+          description: Computed GitHub web URL for the pull request.
+          example: https://github.com/fabro-sh/fabro/pull/123
+    RunQuestion:
+      description: A pending human-in-the-loop question summary.
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: Question text.
+          example: Accept or push for another round?
+    RunLinks:
+      type: object
+      required:
+        - web
+      properties:
+        web:
+          type:
+            - string
+            - 'null'
+          format: uri
+    ErrorResponseEntry:
+      description: A single error entry in an error response.
+      type: object
+      required:
+        - status
+        - title
+        - detail
+      properties:
+        status:
+          type: string
+          description: HTTP status code as a string.
+          example: '404'
+        title:
+          type: string
+          description: Short error classification.
+          example: Not Found
+        detail:
+          type: string
+          description: Human-readable error description.
+          example: Run not found.
+        code:
+          type: string
+          description: Optional machine-readable error code for structured client handling.
+          example: access_token_expired
+        request_id:
+          type: string
+          format: uuid
+          description: >-
+            Server-generated request identifier; matches the x-request-id
+            response header.
+    GitContext:
+      description: Observable git state captured before the run starts.
+      type: object
+      required:
+        - origin_url
+        - branch
+        - dirty
+      properties:
+        origin_url:
+          type: string
+          description: Remote origin URL with any embedded credentials removed.
+          example: https://github.com/acme/my-app.git
+        branch:
+          type: string
+          description: Current branch name.
+          example: feature/foo
+        sha:
+          type:
+            - string
+            - 'null'
+          description: Current commit SHA, when known.
+          example: abc123def
+        dirty:
+          $ref: '#/components/schemas/DirtyStatus'
+    ManifestGoal:
+      description: Resolved goal kind and content.
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum:
+            - value
+            - file
+            - graph
+        text:
+          type: string
+          description: Resolved goal content.
+    ManifestArgs:
+      description: Sparse command-local args that affect run settings.
+      type: object
+      properties:
+        model:
+          type: string
+        provider:
+          type: string
+        environment:
+          type: string
+          description: Named environment slug to select for the run.
+        verbose:
+          type: boolean
+        dry_run:
+          type: boolean
+        auto_approve:
+          type: boolean
+        preserve_sandbox:
+          type: boolean
+        label:
+          type: array
+          items:
+            type: string
+        input:
+          type: array
+          description: Raw repeated CLI input overrides, each in `KEY=VALUE` form.
+          items:
+            type: string
+    ManifestTarget:
+      type: object
+      required:
+        - path
+      properties:
+        path:
+          type: string
+          description: Resolved path that keys into the workflows map.
+          example: .fabro/workflows/smoke/workflow.fabro
+    ManifestConfig:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - project
+            - user
+        path:
+          type:
+            - string
+            - 'null'
+        source:
+          type:
+            - string
+            - 'null'
+    ManifestWorkflow:
+      type: object
+      required:
+        - source
+      properties:
+        source:
+          type: string
+        config:
+          $ref: '#/components/schemas/ManifestWorkflowConfig'
+        files:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ManifestFileEntry'
+    WorkflowVersionId:
+      description: >-
+        SHA-256 identity of validated canonical workflow-version bytes. Hex
+        input is case-insensitive; Fabro emits the canonical lowercase form.
+      type: string
+      pattern: ^[0-9A-Fa-f]{64}$
+      example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    RunTarget:
+      description: Workspace content and location requested for a run.
+      oneOf:
+        - $ref: '#/components/schemas/GitRunTarget'
+        - $ref: '#/components/schemas/NoneRunTarget'
+        - $ref: '#/components/schemas/FolderRunTarget'
+      discriminator:
+        propertyName: kind
+        mapping:
+          git:
+            $ref: '#/components/schemas/GitRunTarget'
+          none:
+            $ref: '#/components/schemas/NoneRunTarget'
+          folder:
+            $ref: '#/components/schemas/FolderRunTarget'
+    RunIntentArgs:
+      description: Structured run overrides accepted by workflow-version creation.
+      type: object
+      additionalProperties: false
+      properties:
+        model:
+          type: string
+        provider:
+          type: string
+          description: LLM provider; this does not select the sandbox environment.
+        inputs:
+          type: object
+          additionalProperties:
+            anyOf:
+              - type: string
+              - type: number
+              - type: integer
+              - type: boolean
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        dry_run:
+          type: boolean
+          description: >-
+            Overrides `run.execution.mode`: true selects `dry_run`, false
+            selects `normal`, and omission inherits the lower-precedence
+            setting.
+        auto_approve:
+          type: boolean
+          description: >-
+            Overrides `run.execution.approval`: true selects `auto`, false
+            selects `prompt`, and omission inherits the lower-precedence
+            setting.
+        preserve_sandbox:
+          type: boolean
+          description: >-
+            Overrides `run.environment.lifecycle.preserve`; omission inherits
+            the lower-precedence setting.
+    ResolvedAutomationGitWorkflowSource:
+      description: >-
+        Workflow source coordinate and exact commit captured when an automation
+        run was created. The requested selectors remain available for audit
+        context while `resolved_sha` identifies the immutable source revision
+        that supplied the workflow bytes.
+      type: object
+      additionalProperties: false
+      required:
+        - repo
+        - branch
+        - resolved_sha
+      properties:
+        repo:
+          type: string
+          description: GitHub repository slug in `owner/name` form.
+        branch:
+          type: string
+          description: Required branch fallback and audit context.
+        tag:
+          type: string
+          description: Optional tag requested by the automation.
+        sha:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+          description: Optional exact commit requested by the automation.
+        resolved_sha:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+          description: Exact lowercase Git commit that supplied the workflow bytes.
+    PrincipalUser:
+      type: object
+      required:
+        - kind
+        - identity
+        - login
+        - auth_method
+      properties:
+        kind:
+          type: string
+          enum:
+            - user
+        identity:
+          $ref: '#/components/schemas/IdpIdentity'
+        login:
+          type: string
+        auth_method:
+          $ref: '#/components/schemas/AuthMethod'
+        avatar_url:
+          type:
+            - string
+            - 'null'
+    PrincipalWorker:
+      type: object
+      required:
+        - kind
+        - run_id
+      properties:
+        kind:
+          type: string
+          enum:
+            - worker
+        run_id:
+          type: string
+    PrincipalWebhook:
+      type: object
+      required:
+        - kind
+        - delivery_id
+      properties:
+        kind:
+          type: string
+          enum:
+            - webhook
+        delivery_id:
+          type: string
+    PrincipalSlack:
+      type: object
+      required:
+        - kind
+        - team_id
+        - user_id
+      properties:
+        kind:
+          type: string
+          enum:
+            - slack
+        team_id:
+          type: string
+        user_id:
+          type: string
+        user_name:
+          type:
+            - string
+            - 'null'
+    PrincipalAgent:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - agent
+        session_id:
+          type:
+            - string
+            - 'null'
+        parent_session_id:
+          type:
+            - string
+            - 'null'
+        model:
+          type:
+            - string
+            - 'null'
+    PrincipalSystem:
+      type: object
+      required:
+        - kind
+        - system_kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - system
+        system_kind:
+          $ref: '#/components/schemas/SystemActorKind'
+    RunStatus:
+      description: >
+        Execution status of a run. Archive state is represented separately on
+        `RunLifecycle.archived` so terminal status payloads remain intact.
+      oneOf:
+        - $ref: '#/components/schemas/RunStatusSubmitted'
+        - $ref: '#/components/schemas/RunStatusPending'
+        - $ref: '#/components/schemas/RunStatusRunnable'
+        - $ref: '#/components/schemas/RunStatusStarting'
+        - $ref: '#/components/schemas/RunStatusRunning'
+        - $ref: '#/components/schemas/RunStatusBlocked'
+        - $ref: '#/components/schemas/RunStatusPaused'
+        - $ref: '#/components/schemas/RunStatusRemoving'
+        - $ref: '#/components/schemas/RunStatusSucceeded'
+        - $ref: '#/components/schemas/RunStatusFailed'
+        - $ref: '#/components/schemas/RunStatusDead'
+      discriminator:
+        propertyName: kind
+        mapping:
+          submitted:
+            $ref: '#/components/schemas/RunStatusSubmitted'
+          pending:
+            $ref: '#/components/schemas/RunStatusPending'
+          runnable:
+            $ref: '#/components/schemas/RunStatusRunnable'
+          starting:
+            $ref: '#/components/schemas/RunStatusStarting'
+          running:
+            $ref: '#/components/schemas/RunStatusRunning'
+          blocked:
+            $ref: '#/components/schemas/RunStatusBlocked'
+          paused:
+            $ref: '#/components/schemas/RunStatusPaused'
+          removing:
+            $ref: '#/components/schemas/RunStatusRemoving'
+          succeeded:
+            $ref: '#/components/schemas/RunStatusSucceeded'
+          failed:
+            $ref: '#/components/schemas/RunStatusFailed'
+          dead:
+            $ref: '#/components/schemas/RunStatusDead'
+    RunApproval:
+      description: >-
+        Pre-execution approval state for runs that require one-time human
+        approval.
+      type: object
+      required:
+        - state
+        - requested_at
+        - decided_at
+        - denial_reason
+      properties:
+        state:
+          $ref: '#/components/schemas/RunApprovalState'
+        requested_at:
+          type: string
+          format: date-time
+        decided_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        denial_reason:
+          type:
+            - string
+            - 'null'
+    RunControlAction:
+      description: Run control action requested by the API.
+      type: string
+      enum:
+        - cancel
+        - pause
+        - unpause
+    RunError:
+      description: Error information for a failed run.
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Error message.
+          example: Stage 'apply-changes' exceeded maximum retries.
+    RunSandboxKind:
+      description: Lifecycle state for a run sandbox request.
+      type: string
+      enum:
+        - planned
+        - initializing
+        - ready
+        - failed
+    RunSandboxPlan:
+      description: Requested sandbox provider and base image/snapshot from run settings.
+      type: object
+      required:
+        - provider
+      properties:
+        provider:
+          $ref: '#/components/schemas/SandboxProviderKind'
+        image:
+          type:
+            - string
+            - 'null'
+        snapshot:
+          type:
+            - string
+            - 'null'
+    RunSandboxInstance:
+      description: Initialized sandbox provider and runtime metadata.
+      type: object
+      required:
+        - provider
+        - runtime
+      properties:
+        provider:
+          $ref: '#/components/schemas/SandboxProviderKind'
+        image:
+          type:
+            - string
+            - 'null'
+        snapshot:
+          type:
+            - string
+            - 'null'
+        runtime:
+          $ref: '#/components/schemas/RunSandboxRuntime'
+    RunSandboxFailure:
+      description: Sandbox initialization failure details.
+      type: object
+      required:
+        - provider
+        - error
+        - causes
+        - duration_ms
+      properties:
+        provider:
+          type: string
+          description: Provider reported by the sandbox initialization event.
+        error:
+          type: string
+        causes:
+          type: array
+          items:
+            type: string
+        duration_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+    DirtyStatus:
+      type: string
+      enum:
+        - clean
+        - dirty
+        - unknown
+    ManifestWorkflowConfig:
+      type: object
+      required:
+        - path
+        - source
+      properties:
+        path:
+          type: string
+        source:
+          type: string
+    ManifestFileEntry:
+      description: A bundled file with discovery metadata.
+      type: object
+      required:
+        - content
+        - ref
+      properties:
+        content:
+          type: string
+        ref:
+          $ref: '#/components/schemas/ManifestFileRef'
+    GitRunTarget:
+      description: >-
+        Public github.com repository target. The branch names the attached
+        working branch. An optional tag selects a release at worker start, and
+        an optional exact SHA is authoritative when both are present.
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - repo
+        - branch
+      properties:
+        kind:
+          type: string
+          enum:
+            - git
+        repo:
+          type: string
+          description: GitHub repository slug in `owner/name` form.
+          example: acme/my-app
+        branch:
+          type: string
+          description: Required attached working branch name, preserved exactly.
+          example: feature/foo
+        tag:
+          type: string
+          minLength: 1
+          description: >-
+            Optional bare tag name. Prefixes such as `refs/tags/` and `tags/`
+            are rejected. Without `sha`, the worker resolves this tag when the
+            sandbox starts and fails if it is unavailable.
+          example: v1.2.3
+        sha:
+          type: string
+          pattern: ^[0-9A-Fa-f]{40}$
+          description: >-
+            Optional exact commit. The server lowercase-normalizes its syntax
+            but does not resolve it, prove branch ancestry, or prove that it
+            matches an accompanying tag. When present, this exact commit wins.
+    NoneRunTarget:
+      description: >-
+        Empty workspace with no repository. Docker and Daytona accept this
+        target and suppress cloning even when workflow settings enable it. Local
+        environments reject it; Local scratch allocation is a separate future
+        capability.
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - none
+    FolderRunTarget:
+      description: >-
+        Existing directory on the Fabro server, executed in place by a Local
+        environment. The submitted path must be absolute and name an existing
+        directory; Fabro resolves symlinks and persists its canonical UTF-8
+        path. This target is intended for trusted single-tenant deployments.
+        Docker and Daytona environments always reject it. This target does not
+        add Local Git cloning or Local scratch workspaces. Folder runs execute
+        in place without Fabro Git checkpoints, so fork and rewind are
+        unavailable.
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - path
+      properties:
+        kind:
+          type: string
+          enum:
+            - folder
+        path:
+          type: string
+          minLength: 1
+          description: Absolute path on the Fabro server, not on the API caller's machine.
+    IdpIdentity:
+      type: object
+      required:
+        - issuer
+        - subject
+      properties:
+        issuer:
+          type: string
+        subject:
+          type: string
+    AuthMethod:
+      description: Runtime user authentication method.
+      type: string
+      enum:
+        - github
+        - dev_token
+    SystemActorKind:
+      type: string
+      enum:
+        - engine
+        - watchdog
+        - timeout
+    RunStatusSubmitted:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - submitted
+    RunStatusPending:
+      type: object
+      required:
+        - kind
+        - reason
+      properties:
+        kind:
+          type: string
+          enum:
+            - pending
+        reason:
+          $ref: '#/components/schemas/PendingReason'
+    RunStatusRunnable:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - runnable
+    RunStatusStarting:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - starting
+    RunStatusRunning:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - running
+    RunStatusBlocked:
+      type: object
+      required:
+        - kind
+        - blocked_reason
+      properties:
+        kind:
+          type: string
+          enum:
+            - blocked
+        blocked_reason:
+          $ref: '#/components/schemas/BlockedReason'
+    RunStatusPaused:
+      type: object
+      required:
+        - kind
+        - prior_block
+      properties:
+        kind:
+          type: string
+          enum:
+            - paused
+        prior_block:
+          oneOf:
+            - $ref: '#/components/schemas/BlockedReason'
+            - type: 'null'
+    RunStatusRemoving:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - removing
+    RunStatusSucceeded:
+      type: object
+      required:
+        - kind
+        - reason
+      properties:
+        kind:
+          type: string
+          enum:
+            - succeeded
+        reason:
+          $ref: '#/components/schemas/SuccessReason'
+    RunStatusFailed:
+      type: object
+      required:
+        - kind
+        - reason
+      properties:
+        kind:
+          type: string
+          enum:
+            - failed
+        reason:
+          $ref: '#/components/schemas/FailureReason'
+    RunStatusDead:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - dead
+    RunApprovalState:
+      description: State of a run's pre-execution approval request.
+      type: string
+      enum:
+        - pending
+        - approved
+        - denied
+    SandboxProviderKind:
+      description: Sandbox provider discriminator.
+      type: string
+      enum:
+        - local
+        - docker
+        - daytona
+    RunSandboxRuntime:
+      type: object
+      required:
+        - id
+        - working_directory
+        - repo_cloned
+        - clone_origin_url
+        - clone_branch
+      properties:
+        id:
+          type: string
+        working_directory:
+          type: string
+        repo_cloned:
+          type:
+            - boolean
+            - 'null'
+        clone_origin_url:
+          type:
+            - string
+            - 'null'
+        clone_branch:
+          type:
+            - string
+            - 'null'
+        workspace_root:
+          type:
+            - string
+            - 'null'
+        repos_root:
+          type:
+            - string
+            - 'null'
+        primary_repo_path:
+          type:
+            - string
+            - 'null'
+        primary_repo_link:
+          type:
+            - string
+            - 'null'
+    ManifestFileRef:
+      type: object
+      required:
+        - type
+        - original
+      properties:
+        type:
+          type: string
+          enum:
+            - file_inline
+            - import
+            - dockerfile
+        original:
+          type: string
+        from:
+          type:
+            - string
+            - 'null'
+    PendingReason:
+      description: Reason a pre-execution run is pending instead of runnable.
+      type: string
+      enum:
+        - approval_required
+    BlockedReason:
+      description: Specific reason a run is blocked on external intervention.
+      type: string
+      enum:
+        - human_input_required
+    SuccessReason:
+      description: Reason attached to a successful terminal run status.
+      type: string
+      enum:
+        - completed
+        - partial_success
+    FailureReason:
+      description: Reason attached to a failed terminal run status.
+      type: string
+      enum:
+        - workflow_error
+        - publish_failed
+        - cancelled
+        - approval_denied
+        - terminated
+        - transient_infra
+        - budget_exhausted
+        - launch_failed
+        - bootstrap_failed
+        - sandbox_init_failed
+  headers:
+    XRequestId:
+      description: >
+        Server-generated request identifier emitted on every response and
+        referenced on standard error responses for correlating client errors
+        with server logs.
+      schema:
+        type: string
+        format: uuid
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: >
+        Raw dev token passed as `Authorization: Bearer fabro_dev_...` when
+        `server.auth.methods` includes `dev-token`.
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: __fabro_session
+      description: >
+        Private session cookie issued after a successful web login. The server
+        verifies and decodes the cookie before authenticating the request.
+
+````
