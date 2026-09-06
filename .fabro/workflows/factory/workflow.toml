@@ -3,6 +3,10 @@ _version = 1
 [workflow]
 graph = "workflow.fabro"
 
+[run.model]
+name = "claude-sonnet-4-6"
+provider = "openrouter"
+
 [run.environment]
 id = "local"
 

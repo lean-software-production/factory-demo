@@ -1,0 +1,7 @@
+{
+  "name": "Fabro Factory Demo",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "postCreateCommand": "fabro --version"
+}
