@@ -10,10 +10,10 @@ A local snapshot of the official Fabro documentation is available at
 
 ## Factory
 
-The factory reads `docs/spec.md`, writes `docs/plan.md`, and implements one
-validated plan step at a time.
+The factory reads the [Tetris specification](docs/spec.md), writes
+`docs/plan.md`, and implements one validated plan step at a time.
 
-After writing a specification, run it with:
+Run it with:
 
 ```sh
 fabro run factory
