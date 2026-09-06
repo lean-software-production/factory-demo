@@ -15,37 +15,39 @@ The factory reads the [Tetris specification](docs/spec.md), writes
 
 ## Run in a dev container
 
-Open this repository in a GitHub Codespace or a Dev Container. Node.js and a
-pinned version of Fabro are already installed.
+Open this repository in a GitHub Codespace or a local Dev Container. The
+[`fabro` dev container feature](https://github.com/lean-software-production/devcontainer-features/tree/main/src/fabro)
+installs the CLI, starts a local Fabro server, and opens a setup wizard the
+first time you open the project.
 
-On first use, configure a local Fabro server and connect it to OpenRouter. You
-can skip LLM setup when `fabro install` prompts for it.
+The wizard asks which LLM account to use. Choosing OpenAI signs you in with a
+ChatGPT or Codex subscription over an OAuth device code -- it prints a URL and a
+short code, and you enter the code in a browser. Because nothing calls back to
+`localhost`, the same flow works in a browser-based Codespace, in VS Code
+Desktop, and over SSH. Anthropic and OpenRouter prompt for an API key instead.
+
+If the wizard does not appear, or you want to change providers later:
 
 ```sh
-fabro install
-.devcontainer/configure-openrouter.sh
+fabro-setup           # run the wizard, or exit quietly if already configured
+fabro-setup --force   # switch providers, or retry a failed sign-in
+fabro-status          # report which credentials are configured
 ```
 
-The second command prompts for an OpenRouter API key and stores it in Fabro's
-server vault. Never commit an API key to this repository.
+Credentials are stored in the Fabro server vault under `~/.fabro`. Never commit
+an API key to this repository.
 
-Run it with:
+Then run the factory:
 
 ```sh
 fabro run factory
 ```
 
-The workflow uses `claude-sonnet-4-6` through OpenRouter by default. To use a
-direct provider instead, authenticate with it and override the defaults:
+The workflow does not pin a provider, so it uses whichever one the wizard
+configured, with that provider's default model. Override either per run:
 
 ```sh
-# ChatGPT/Codex subscription (OpenAI OAuth) or OpenAI API
-fabro provider login --provider openai
 fabro run factory --provider openai --model gpt-5.4-mini
-
-# Anthropic API
-fabro provider login --provider anthropic
-fabro run factory --provider anthropic --model claude-sonnet-4-6
 ```
 
 Fabro can use a ChatGPT/Codex subscription through OpenAI OAuth. Its documented

@@ -1,7 +1,10 @@
 {
   "name": "Fabro Factory Demo",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
-  "postCreateCommand": "fabro --version"
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "features": {
+    "ghcr.io/lean-software-production/devcontainer-features/fabro:1": {
+      "version": "0.254.0",
+      "provider": "openai"
+    }
+  }
 }

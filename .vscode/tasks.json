@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Fabro: setup",
+      "detail": "Connect Fabro to your LLM account. Exits silently once configured.",
+      "type": "shell",
+      "command": "fabro-setup",
+      "runOptions": { "runOn": "folderOpen" },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
