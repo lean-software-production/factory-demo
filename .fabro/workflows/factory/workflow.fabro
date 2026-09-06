@@ -1,0 +1,28 @@
+digraph Factory {
+    graph [goal="Implement docs/spec.md one validated step at a time"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Done"]
+
+    plan [label="Plan", prompt="@prompts/plan.md"]
+    implement [
+        label="Implement",
+        prompt="@prompts/implement.md",
+        max_visits=20
+    ]
+    validate [
+        label="Validate",
+        prompt="@prompts/validate.md",
+        output_schema="routing",
+        on_failure="exit",
+        max_visits=20
+    ]
+
+    start -> plan -> implement -> validate
+
+    validate -> implement [
+        label="Continue"
+    ]
+    validate -> exit [label="Done", condition="preferred_label=Done"]
+}
