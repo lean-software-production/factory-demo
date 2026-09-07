@@ -11,6 +11,10 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workspace_dir="/workspaces/$(basename "${project_root}")"
 
+is_codespaces() {
+  [[ "${CODESPACES:-}" == "true" || -n "${CODESPACE_NAME:-}" ]]
+}
+
 container_id() {
   docker ps -q --filter "label=devcontainer.local_folder=${project_root}" | head -n 1
 }
@@ -26,22 +30,44 @@ require_container() {
 }
 
 run_in_container() {
+  if is_codespaces; then
+    "$@"
+    return
+  fi
+
   local id
   id="$(require_container)"
   docker exec -u node -w "${workspace_dir}" -it "${id}" "$@"
 }
 
 list_workflows() {
-  find "${project_root}/.fabro/workflows" -mindepth 1 -maxdepth 1 -type d -printf '  %f\n' | sort
+  local workflow_file
+  for workflow_file in "${project_root}"/.fabro/workflows/*/workflow.toml; do
+    [[ -f "${workflow_file}" ]] || continue
+    printf '  %s\n' "$(basename "$(dirname "${workflow_file}")")"
+  done | sort
+}
+
+fabro_ui_url() {
+  if is_codespaces && [[ -n "${CODESPACE_NAME:-}" && -n "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" ]]; then
+    printf 'https://%s-32276.%s\n' "${CODESPACE_NAME}" "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+  else
+    printf 'http://localhost:32276\n'
+  fi
 }
 
 command="${1:-help}"
 
 case "${command}" in
   setup)
-    id="$(require_container)"
-    run_in_container fabro-setup
-    docker exec -u node "${id}" fabro server restart --bind 0.0.0.0:32276
+    if is_codespaces; then
+      fabro-setup "${@:2}"
+      fabro server restart --bind 0.0.0.0:32276
+    else
+      id="$(require_container)"
+      run_in_container fabro-setup "${@:2}"
+      docker exec -u node "${id}" fabro server restart --bind 0.0.0.0:32276
+    fi
     ;;
   run)
     workflow="${2:-}"
@@ -54,13 +80,22 @@ case "${command}" in
     run_in_container fabro run "${workflow}" --environment local
     ;;
   ui)
-    id="$(require_container)"
-    if ! docker exec -u node "${id}" test -r /home/node/.fabro/storage/server.dev-token; then
-      printf 'Fabro is not configured for the Dev Container user. Run:\n  bin/dev setup\n' >&2
-      exit 1
+    if is_codespaces; then
+      token_path="${HOME}/.fabro/storage/server.dev-token"
+      if [[ ! -r "${token_path}" ]]; then
+        printf 'Fabro is not configured for this Codespace user. Run:\n  bin/dev setup\n' >&2
+        exit 1
+      fi
+      token="$(cat "${token_path}")"
+    else
+      id="$(require_container)"
+      if ! docker exec -u node "${id}" test -r /home/node/.fabro/storage/server.dev-token; then
+        printf 'Fabro is not configured for the Dev Container user. Run:\n  bin/dev setup\n' >&2
+        exit 1
+      fi
+      token="$(docker exec -u node "${id}" cat /home/node/.fabro/storage/server.dev-token)"
     fi
-    token="$(docker exec -u node "${id}" cat /home/node/.fabro/storage/server.dev-token)"
-    printf 'Fabro web UI: http://localhost:32276\n'
+    printf 'Fabro web UI: %s\n' "$(fabro_ui_url)"
     printf 'Fabro development token: %s\n' "${token}"
     ;;
   status)

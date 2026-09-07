@@ -29,9 +29,9 @@ Desktop, and over SSH. Anthropic and OpenRouter prompt for an API key instead.
 If the wizard does not appear, or you want to change providers later:
 
 ```sh
-fabro-setup           # run the wizard, or exit quietly if already configured
-fabro-setup --force   # switch providers, or retry a failed sign-in
-fabro-status          # report which credentials are configured
+bin/dev setup           # run the wizard, or exit quietly if already configured
+bin/dev setup --force   # switch providers, or retry a failed sign-in
+bin/dev status          # report which credentials are configured
 ```
 
 Credentials are stored in the Fabro server vault under `~/.fabro`. Never commit
@@ -40,15 +40,19 @@ an API key to this repository.
 Then run the workflow:
 
 ```sh
-fabro run implement-spec
+bin/dev run implement-spec
 ```
 
-The workflow does not pin a provider, so it uses whichever one the wizard
-configured, with that provider's default model. Override either per run:
+List available workflows or open the Fabro UI:
 
 ```sh
-fabro run implement-spec --provider openai --model gpt-5.4-mini
+bin/dev run
+bin/dev ui
 ```
+
+`bin/dev` works both from the host with a local Dev Container and inside a
+GitHub Codespace. In a Codespace, `bin/dev ui` prints the forwarded Codespaces
+URL instead of a localhost URL.
 
 Fabro can use a ChatGPT/Codex subscription through OpenAI OAuth. Its documented
 Anthropic integration requires separately billed API credentials; a Claude
