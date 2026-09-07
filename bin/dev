@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Fabro development shortcuts.
 #
+#   bin/dev up     Start this project's local Dev Container.
+#   bin/dev down   Stop this project's local Dev Container.
 #   bin/dev setup  Connect Fabro to an LLM account (interactive device sign-in).
 #   bin/dev run    List available workflows; use `bin/dev run <workflow>` to run one locally.
 #   bin/dev ui     Print the Fabro web UI URL and development token.
@@ -59,6 +61,25 @@ fabro_ui_url() {
 command="${1:-help}"
 
 case "${command}" in
+  up)
+    if is_codespaces; then
+      printf 'This Codespace is already managed by GitHub; use the Codespaces controls to stop or restart it.\n'
+    else
+      devcontainer up --workspace-folder "${project_root}"
+    fi
+    ;;
+  down)
+    if is_codespaces; then
+      printf 'This Codespace is managed by GitHub; use the Codespaces controls to stop or restart it.\n'
+    else
+      id="$(container_id)"
+      if [[ -z "${id}" ]]; then
+        printf 'Dev Container is not running.\n'
+      else
+        docker stop "${id}"
+      fi
+    fi
+    ;;
   setup)
     if is_codespaces; then
       fabro-setup "${@:2}"
@@ -103,11 +124,11 @@ case "${command}" in
     run_in_container fabro server status
     ;;
   help|-h|--help)
-    sed -n '2,7p' "${BASH_SOURCE[0]}"
+    sed -n '2,9p' "${BASH_SOURCE[0]}"
     ;;
   *)
     printf 'Unknown command: %s\n\n' "${command}" >&2
-    sed -n '2,7p' "${BASH_SOURCE[0]}" >&2
+    sed -n '2,9p' "${BASH_SOURCE[0]}" >&2
     exit 2
     ;;
 esac

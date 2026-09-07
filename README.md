@@ -20,6 +20,13 @@ Open this repository in a GitHub Codespace or a local Dev Container. The
 installs the CLI, starts a local Fabro server, and opens a setup wizard the
 first time you open the project.
 
+From the host, start or stop the local Dev Container with:
+
+```sh
+bin/dev up
+bin/dev down
+```
+
 The wizard asks which LLM account to use. Choosing OpenAI signs you in with a
 ChatGPT or Codex subscription over an OAuth device code -- it prints a URL and a
 short code, and you enter the code in a browser. Because nothing calls back to
