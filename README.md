@@ -8,10 +8,10 @@ This repository is a small, readable example of a software factory built with
 A local snapshot of the official Fabro documentation is available at
 [docs/reference/fabro](docs/reference/fabro/README.md).
 
-## Factory
+## Implement spec
 
-The factory reads the [Tetris specification](docs/spec.md), writes
-`docs/plan.md`, and implements one validated plan step at a time.
+The `implement-spec` workflow reads the [Tetris specification](docs/spec.md),
+writes `docs/plan.md`, and implements one validated plan step at a time.
 
 ## Run in a dev container
 
@@ -37,17 +37,17 @@ fabro-status          # report which credentials are configured
 Credentials are stored in the Fabro server vault under `~/.fabro`. Never commit
 an API key to this repository.
 
-Then run the factory:
+Then run the workflow:
 
 ```sh
-fabro run factory
+fabro run implement-spec
 ```
 
 The workflow does not pin a provider, so it uses whichever one the wizard
 configured, with that provider's default model. Override either per run:
 
 ```sh
-fabro run factory --provider openai --model gpt-5.4-mini
+fabro run implement-spec --provider openai --model gpt-5.4-mini
 ```
 
 Fabro can use a ChatGPT/Codex subscription through OpenAI OAuth. Its documented

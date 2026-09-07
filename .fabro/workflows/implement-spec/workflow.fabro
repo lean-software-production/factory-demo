@@ -1,4 +1,4 @@
-digraph Factory {
+digraph ImplementSpec {
     graph [goal="Implement docs/spec.md one validated step at a time"]
     rankdir=LR
 
