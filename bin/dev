@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Fabro development shortcuts.
+#
+#   bin/dev setup  Connect Fabro to an LLM account (interactive device sign-in).
+#   bin/dev run    List available workflows; use `bin/dev run <workflow>` to run one locally.
+#   bin/dev ui     Print the Fabro web UI URL and development token.
+#   bin/dev status Show Fabro's configured provider and server status.
+
+set -euo pipefail
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+workspace_dir="/workspaces/$(basename "${project_root}")"
+
+container_id() {
+  docker ps -q --filter "label=devcontainer.local_folder=${project_root}" | head -n 1
+}
+
+require_container() {
+  local id
+  id="$(container_id)"
+  if [[ -z "${id}" ]]; then
+    printf 'Dev Container is not running. Start it with:\n  devcontainer up --workspace-folder %q\n' "${project_root}" >&2
+    exit 1
+  fi
+  printf '%s' "${id}"
+}
+
+run_in_container() {
+  local id
+  id="$(require_container)"
+  docker exec -u node -w "${workspace_dir}" -it "${id}" "$@"
+}
+
+list_workflows() {
+  find "${project_root}/.fabro/workflows" -mindepth 1 -maxdepth 1 -type d -printf '  %f\n' | sort
+}
+
+command="${1:-help}"
+
+case "${command}" in
+  setup)
+    id="$(require_container)"
+    run_in_container fabro-setup
+    docker exec -u node "${id}" fabro server restart --bind 0.0.0.0:32276
+    ;;
+  run)
+    workflow="${2:-}"
+    if [[ -z "${workflow}" ]]; then
+      printf 'Available workflows:\n'
+      list_workflows
+      printf '\nRun one with:\n  bin/dev run <workflow>\n'
+      exit 0
+    fi
+    run_in_container fabro run "${workflow}" --environment local
+    ;;
+  ui)
+    id="$(require_container)"
+    if ! docker exec -u node "${id}" test -r /home/node/.fabro/storage/server.dev-token; then
+      printf 'Fabro is not configured for the Dev Container user. Run:\n  bin/dev setup\n' >&2
+      exit 1
+    fi
+    token="$(docker exec -u node "${id}" cat /home/node/.fabro/storage/server.dev-token)"
+    printf 'Fabro web UI: http://localhost:32276\n'
+    printf 'Fabro development token: %s\n' "${token}"
+    ;;
+  status)
+    run_in_container fabro-status
+    run_in_container fabro server status
+    ;;
+  help|-h|--help)
+    sed -n '2,7p' "${BASH_SOURCE[0]}"
+    ;;
+  *)
+    printf 'Unknown command: %s\n\n' "${command}" >&2
+    sed -n '2,7p' "${BASH_SOURCE[0]}" >&2
+    exit 2
+    ;;
+esac

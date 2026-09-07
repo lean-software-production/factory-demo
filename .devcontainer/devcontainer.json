@@ -10,6 +10,9 @@
   "forwardPorts": [
     32276
   ],
+  "appPort": [
+    "127.0.0.1:32276:32276"
+  ],
   "portsAttributes": {
     "32276": {
       "label": "Fabro",
