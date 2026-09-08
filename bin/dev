@@ -7,11 +7,35 @@
 #   bin/dev run    List available workflows; use `bin/dev run <workflow>` to run one locally.
 #   bin/dev ui     Print the Fabro web UI URL and development token.
 #   bin/dev status Show Fabro's configured provider and server status.
+#
+# Works from either side of the container boundary: from the host it drives the
+# Dev Container with `docker exec`, and inside the Dev Container or a GitHub
+# Codespace it runs the commands directly.
 
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workspace_dir="/workspaces/$(basename "${project_root}")"
+fabro_port=32276
+
+# Two separate questions, deliberately kept apart.
+#
+# `inside_container` decides how to run a command: the Fabro CLI on PATH means
+# we are already in the container, where there is no Docker socket to reach it
+# through. It is true in a Codespace and in a local Dev Container alike.
+#
+# `is_codespaces` only changes what we tell a human, because a Codespace is
+# started and stopped from GitHub rather than from here.
+if command -v fabro >/dev/null 2>&1; then
+  inside_container=1
+  # Codespaces forwards the port from inside the container, so loopback is enough.
+  bind_address="127.0.0.1:${fabro_port}"
+else
+  inside_container=0
+  # The host publishes 127.0.0.1:32276 into the container, which only reaches a
+  # server listening on all interfaces.
+  bind_address="0.0.0.0:${fabro_port}"
+fi
 
 is_codespaces() {
   [[ "${CODESPACES:-}" == "true" || -n "${CODESPACE_NAME:-}" ]]
@@ -25,21 +49,58 @@ require_container() {
   local id
   id="$(container_id)"
   if [[ -z "${id}" ]]; then
-    printf 'Dev Container is not running. Start it with:\n  devcontainer up --workspace-folder %q\n' "${project_root}" >&2
+    printf 'Dev Container is not running. Start it with:\n  bin/dev up\n' >&2
     exit 1
   fi
   printf '%s' "${id}"
 }
 
+# Interactive: keeps a TTY attached for device sign-in and workflow output.
 run_in_container() {
-  if is_codespaces; then
-    "$@"
-    return
+  if (( inside_container )); then
+    (cd "${project_root}" && "$@")
+  else
+    docker exec -u node -w "${workspace_dir}" -it "$(require_container)" "$@"
   fi
+}
 
-  local id
-  id="$(require_container)"
-  docker exec -u node -w "${workspace_dir}" -it "${id}" "$@"
+# Non-interactive: for commands whose output we capture or discard.
+run_in_container_quiet() {
+  if (( inside_container )); then
+    (cd "${project_root}" && "$@")
+  else
+    docker exec -u node -w "${workspace_dir}" "$(require_container)" "$@"
+  fi
+}
+
+dev_token_path() {
+  if (( inside_container )); then
+    printf '%s/.fabro/storage/server.dev-token' "${HOME}"
+  else
+    printf '/home/node/.fabro/storage/server.dev-token'
+  fi
+}
+
+# The address to open in a browser. In a Codespace that is the forwarded-ports
+# domain; on a host running a Dev Container it is the published port. This is
+# not the origin the server advertises -- the fabro dev container feature owns
+# that, and gets it right as of 1.2.1.
+browse_url() {
+  if is_codespaces && [[ -n "${CODESPACE_NAME:-}" && -n "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" ]]; then
+    printf 'https://%s-%s.%s' "${CODESPACE_NAME}" "${fabro_port}" "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+  else
+    printf 'http://localhost:%s' "${fabro_port}"
+  fi
+}
+
+# Where the container already exists, say so rather than failing obscurely:
+# neither `devcontainer up` nor `docker stop` can reach out from inside it.
+explain_lifecycle_from_inside() {
+  if is_codespaces; then
+    printf 'This Codespace is managed by GitHub; use the Codespaces controls to stop or restart it.\n'
+  else
+    printf 'Already inside the Dev Container. Run `bin/dev %s` from the host instead.\n' "$1"
+  fi
 }
 
 list_workflows() {
@@ -50,27 +111,19 @@ list_workflows() {
   done | sort
 }
 
-fabro_ui_url() {
-  if is_codespaces && [[ -n "${CODESPACE_NAME:-}" && -n "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" ]]; then
-    printf 'https://%s-32276.%s\n' "${CODESPACE_NAME}" "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
-  else
-    printf 'http://localhost:32276\n'
-  fi
-}
-
 command="${1:-help}"
 
 case "${command}" in
   up)
-    if is_codespaces; then
-      printf 'This Codespace is already managed by GitHub; use the Codespaces controls to stop or restart it.\n'
+    if (( inside_container )); then
+      explain_lifecycle_from_inside up
     else
       devcontainer up --workspace-folder "${project_root}"
     fi
     ;;
   down)
-    if is_codespaces; then
-      printf 'This Codespace is managed by GitHub; use the Codespaces controls to stop or restart it.\n'
+    if (( inside_container )); then
+      explain_lifecycle_from_inside down
     else
       id="$(container_id)"
       if [[ -z "${id}" ]]; then
@@ -81,14 +134,8 @@ case "${command}" in
     fi
     ;;
   setup)
-    if is_codespaces; then
-      fabro-setup "${@:2}"
-      fabro server restart --bind 0.0.0.0:32276
-    else
-      id="$(require_container)"
-      run_in_container fabro-setup "${@:2}"
-      docker exec -u node "${id}" fabro server restart --bind 0.0.0.0:32276
-    fi
+    run_in_container fabro-setup "${@:2}"
+    run_in_container_quiet fabro server restart --bind "${bind_address}"
     ;;
   run)
     workflow="${2:-}"
@@ -101,22 +148,13 @@ case "${command}" in
     run_in_container fabro run "${workflow}" --environment local
     ;;
   ui)
-    if is_codespaces; then
-      token_path="${HOME}/.fabro/storage/server.dev-token"
-      if [[ ! -r "${token_path}" ]]; then
-        printf 'Fabro is not configured for this Codespace user. Run:\n  bin/dev setup\n' >&2
-        exit 1
-      fi
-      token="$(cat "${token_path}")"
-    else
-      id="$(require_container)"
-      if ! docker exec -u node "${id}" test -r /home/node/.fabro/storage/server.dev-token; then
-        printf 'Fabro is not configured for the Dev Container user. Run:\n  bin/dev setup\n' >&2
-        exit 1
-      fi
-      token="$(docker exec -u node "${id}" cat /home/node/.fabro/storage/server.dev-token)"
+    token_path="$(dev_token_path)"
+    if ! run_in_container_quiet test -r "${token_path}"; then
+      printf 'Fabro is not configured for the Dev Container user. Run:\n  bin/dev setup\n' >&2
+      exit 1
     fi
-    printf 'Fabro web UI: %s\n' "$(fabro_ui_url)"
+    token="$(run_in_container_quiet cat "${token_path}")"
+    printf 'Fabro web UI: %s\n' "$(browse_url)"
     printf 'Fabro development token: %s\n' "${token}"
     ;;
   status)
