@@ -18,5 +18,6 @@
       "label": "Fabro",
       "onAutoForward": "silent"
     }
-  }
+  },
+  "postStartCommand": "bash .devcontainer/fabro-bind.sh"
 }

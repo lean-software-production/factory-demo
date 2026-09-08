@@ -18,28 +18,39 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workspace_dir="/workspaces/$(basename "${project_root}")"
 fabro_port=32276
 
-# Two separate questions, deliberately kept apart.
+# Three separate questions, deliberately kept apart.
 #
 # `inside_container` decides how to run a command: the Fabro CLI on PATH means
 # we are already in the container, where there is no Docker socket to reach it
 # through. It is true in a Codespace and in a local Dev Container alike.
 #
-# `is_codespaces` only changes what we tell a human, because a Codespace is
-# started and stopped from GitHub rather than from here.
+# `is_codespaces` decides how the port reaches a browser, and what we tell a
+# human about the container's lifecycle, which GitHub owns rather than us.
 if command -v fabro >/dev/null 2>&1; then
   inside_container=1
-  # Codespaces forwards the port from inside the container, so loopback is enough.
-  bind_address="127.0.0.1:${fabro_port}"
 else
   inside_container=0
-  # The host publishes 127.0.0.1:32276 into the container, which only reaches a
-  # server listening on all interfaces.
-  bind_address="0.0.0.0:${fabro_port}"
 fi
 
 is_codespaces() {
   [[ "${CODESPACES:-}" == "true" || -n "${CODESPACE_NAME:-}" ]]
 }
+
+# Which interface the server binds is a question about how the port is exposed,
+# not about where this script happens to be running -- the two look alike from
+# inside a container and are not the same.
+#
+# A Codespace forwards the port from inside the container, so loopback is both
+# enough and the smaller exposure. A local Dev Container is reached through the
+# `appPort` publish in devcontainer.json, and Docker forwards that to the
+# container's eth0 address, never to its loopback -- so a loopback-only server
+# leaves docker-proxy with nothing to connect to and the browser sees
+# ERR_CONNECTION_RESET.
+if is_codespaces; then
+  bind_address="127.0.0.1:${fabro_port}"
+else
+  bind_address="0.0.0.0:${fabro_port}"
+fi
 
 container_id() {
   docker ps -q --filter "label=devcontainer.local_folder=${project_root}" | head -n 1
