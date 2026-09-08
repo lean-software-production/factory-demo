@@ -42,14 +42,23 @@ Forwarded ports are private to you by default.
 
 ### Running locally via VS Code
 
-Open the repository in VS Code and reopen in the container, or start and stop it from your host with:
+You need Docker running on your host, and then either:
+
+- the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers),
+  to open the folder and choose *Reopen in Container*, or
+- the [`devcontainer` CLI](https://github.com/devcontainers/cli), to start and
+  stop the container from a host shell:
 
 ```sh
 bin/dev up      # devcontainer up --workspace-folder .
 bin/dev down    # stop the container
 ```
 
-You can then work either from inside the container, exactly as in a Codespace above, or drive it from your host with the same commands:
+`bin/dev up` calls `devcontainer` directly, so without that CLI it fails with
+`devcontainer: command not found`.
+
+You can then run the commands from inside the container, as in a Codespace, or
+drive it from your host:
 
 ```sh
 bin/dev status              # runs `docker exec` against the running container
@@ -57,17 +66,30 @@ bin/dev ui                  # prints http://localhost:32276 and the token
 bin/dev run implement-spec
 ```
 
-`bin/dev` detects which side it is on: inside the container it runs the Fabro CLI directly, and on the host it finds the container by its `devcontainer.local_folder` label and uses `docker exec`. From the host the container must be running.
+The web UI is at `http://localhost:32276` here -- the address `bin/dev ui`
+prints, and unlike a Codespace, plain `localhost` is correct. The PORTS panel
+lists 32276 twice, once as *Dev Containers* (from `forwardPorts`) and once as
+*Statically Forwarded* (from `appPort`). Both reach the same server, so the
+duplicate row is expected rather than a misconfiguration.
+
+`bin/dev` detects which side it is on: inside the container it runs the Fabro
+CLI directly, and on the host it finds the container by its
+`devcontainer.local_folder` label and uses `docker exec`. From the host the
+container must be running.
 
 ### Connecting an LLM account
 
 The [`fabro` dev container feature](https://github.com/lean-software-production/devcontainer-features/tree/main/src/fabro)
-opens a setup wizard the first time you open the project. It asks which LLM
-account to use. Choosing OpenAI signs you in with a ChatGPT or Codex
-subscription over an OAuth device code -- it prints a URL and a short code, and
-you enter the code in a browser. Because nothing calls back to `localhost`, the
-same flow works in a browser-based Codespace, in VS Code Desktop, and over SSH.
-Anthropic and OpenRouter prompt for an API key instead.
+ships a setup wizard, which `.vscode/tasks.json` runs whenever VS Code opens the
+folder -- in a Codespace and a local Dev Container alike. Starting the container
+from a host shell with `bin/dev up` opens no editor, so run `bin/dev setup`
+yourself in that case.
+
+The wizard asks which LLM account to use. Choosing OpenAI signs you in with a
+ChatGPT or Codex subscription over an OAuth device code -- it prints a URL and a
+short code, and you enter the code in a browser. Because nothing calls back to
+`localhost`, the same flow works in a browser-based Codespace, in VS Code
+Desktop, and over SSH. Anthropic and OpenRouter prompt for an API key instead.
 
 If the wizard does not appear, or you want to change providers later:
 
@@ -83,8 +105,10 @@ repository.
 
 ### Choosing a provider per run
 
-The workflow does not pin a provider, so it uses whichever one the wizard
-configured, with that provider's default model. Override either per run:
+The workflow pins neither provider nor model, so a run uses what the wizard
+wrote to `[run.model]` in `~/.fabro/settings.toml`. For OpenAI that is a
+specific model, `gpt-5.6-luna`, rather than the provider's own default. Override
+either per run:
 
 ```sh
 fabro run implement-spec --provider openai --model gpt-5.4-mini
