@@ -111,7 +111,7 @@ specific model, `gpt-5.6-luna`, rather than the provider's own default. Override
 either per run:
 
 ```sh
-fabro run implement-spec --provider openai --model gpt-5.4-mini
+bin/dev run implement-spec --provider openai --model gpt-5.4-mini
 ```
 
 Fabro can use a ChatGPT/Codex subscription through OpenAI OAuth. Its documented
