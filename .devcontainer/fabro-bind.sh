@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Binds the Fabro server to the interface this container is actually reached on.
 #
-# Runs from postStartCommand, after the Fabro Feature's own autostart hook.
+# Runs from postStartCommand, after the Fabro Feature's own autostart hook,
+# and from the VS Code setup task after first-time setup.
 #
 # The Feature starts the server on the address in ~/.fabro/settings.toml, which
 # `fabro install` writes as 127.0.0.1 -- the container's loopback. That is right
@@ -25,8 +26,8 @@ if [[ "${CODESPACES:-}" == "true" || -n "${CODESPACE_NAME:-}" ]]; then
   exit 0
 fi
 
-# No settings means `fabro-setup` has not run yet; it will start the server, and
-# the next start picks this up.
+# No settings means `fabro-setup` has not run yet. The VS Code setup task calls
+# this script again after setup; CLI users do the same as documented in README.
 [[ -f "${settings}" ]] || exit 0
 
 bind="0.0.0.0:${port}"

@@ -5,7 +5,7 @@
       "label": "Fabro: setup",
       "detail": "Connect Fabro to your LLM account. Exits silently once configured.",
       "type": "shell",
-      "command": "fabro-setup",
+      "command": "fabro-setup && bash .devcontainer/fabro-bind.sh",
       "runOptions": { "runOn": "folderOpen" },
       "presentation": {
         "reveal": "always",
