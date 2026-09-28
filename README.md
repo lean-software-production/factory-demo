@@ -29,8 +29,12 @@ Once setup is complete, check the server and run the workflow:
 ```sh
 fabro-status
 fabro server status
-fabro run implement-spec
+fabro run implement-spec --environment local
 ```
+
+The `local` environment runs the workflow in the checked-out repository. Keep
+this option in a Codespace: its dev container does not expose a Docker daemon,
+which Fabro's default Docker environment requires.
 
 To use the web UI, open port 32276 from the editor's PORTS panel. Use the
 forwarded `*.app.github.dev` address rather than `localhost`. The UI asks for
@@ -73,7 +77,7 @@ Then use the same Fabro commands as in a Codespace:
 ```sh
 fabro-status
 fabro server status
-fabro run implement-spec
+fabro run implement-spec --environment local
 ```
 
 The local web UI is at <http://localhost:32276>. Print its development token
@@ -112,7 +116,7 @@ server defaults; for OpenAI it selects `gpt-5.6-luna`. Override either for one
 run with Fabro's own options:
 
 ```sh
-fabro run implement-spec --provider openai --model gpt-5.4-mini
+fabro run implement-spec --environment local --provider openai --model gpt-5.4-mini
 ```
 
 Fabro can use a ChatGPT or Codex subscription through OpenAI OAuth. Its
