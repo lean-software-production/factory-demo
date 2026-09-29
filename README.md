@@ -13,6 +13,15 @@ A local snapshot of the official Fabro documentation is available at
 The `implement-spec` workflow reads the [Tetris specification](docs/spec.md),
 writes `docs/plan.md`, and implements one validated plan step at a time.
 
+Before implementation starts, three open-weight models on OpenRouter (Kimi K3,
+DeepSeek V4 Pro and GLM 5.3) review the plan in parallel. Each returns its top
+three suggestions, and a final step updates `docs/plan.md` with them. The
+implementation step also runs on GPT-5.6 Luna through OpenRouter, and the
+remaining steps use GLM 5.3 Flash, the server default. The workflow therefore
+needs an OpenRouter API key. The setup wizard offers OpenRouter first and
+enables it on the Fabro server for you. See the
+[OpenRouter guide](docs/reference/fabro/integrations/openrouter.md).
+
 ## Getting started
 
 This project runs inside a dev container, which provides the Fabro CLI, a local
@@ -66,11 +75,14 @@ so run the wizard yourself after entering the container:
 
 ```sh
 fabro-setup
+bash .devcontainer/fabro-models.sh
 bash .devcontainer/fabro-bind.sh
 ```
 
-The second command makes the newly configured server reachable through Docker's
-published port. It is harmless if the server is already configured.
+The second command adds the models the workflow's reviewers need to the
+server's catalog (see [Model catalog](#model-catalog)). The third makes the
+newly configured server reachable through Docker's published port. Both are
+harmless to run again.
 
 Then use the same Fabro commands as in a Codespace:
 
@@ -94,9 +106,12 @@ expected.
 ### Connecting an LLM account
 
 The [`fabro` dev container feature](https://github.com/lean-software-production/devcontainer-features/tree/main/src/fabro)
-provides `fabro-setup`. The wizard asks which LLM account to use. Choosing
+provides `fabro-setup`. The wizard asks which LLM account to use, offering
+OpenRouter first because the workflow's reviewers run there. OpenRouter and
+Anthropic prompt for an API key. Fabro ships OpenRouter disabled, so choosing
+it also enables it in `~/.fabro/settings.toml` before signing in. Choosing
 OpenAI signs you in with a ChatGPT or Codex subscription using an OAuth device
-code. Anthropic and OpenRouter prompt for an API key instead.
+code.
 
 If the wizard does not appear, or you want to change providers later, run:
 
@@ -109,11 +124,31 @@ fabro-status          # report which credentials are configured
 Credentials are stored in the Fabro server vault under `~/.fabro`, never in the
 repository. Rebuilding the container discards them.
 
+### Model catalog
+
+Fabro's built-in OpenRouter catalog does not include GLM 5.3 or GLM 5.3 Flash.
+Fabro reads model definitions only from the server's `~/.fabro/settings.toml`,
+not from `.fabro/project.toml`, so two things add them there:
+
+- The dev container sets the fabro Feature's `model` option to
+  `z-ai/glm-5.3-flash`. The setup wizard (Feature 1.3.0 or later) adds GLM 5.3
+  Flash to the catalog, makes it the server default, and tests your API key
+  against it. That test would otherwise use Claude Sonnet 5, which fails on
+  keys whose OpenRouter guardrail blocks Claude models.
+- [`.devcontainer/fabro-models.sh`](.devcontainer/fabro-models.sh) adds GLM
+  5.3 for the GLM reviewer, and sends DeepSeek V4 Pro requests to the dated
+  snapshot `deepseek/deepseek-v4-pro-0813`, the version the demo's OpenRouter
+  guardrail approves. It runs when the container starts and again after the
+  setup wizard.
+
 ### Choosing a provider per run
 
-The workflow pins neither provider nor model. The setup wizard configures the
-server defaults; for OpenAI it selects `gpt-5.6-luna`. Override either for one
-run with Fabro's own options:
+The workflow pins the plan reviewers and the implementation step to OpenRouter
+models; these always win over run options. The other steps (plan, collecting
+reviews, refining the plan and validation) use the run's default model. The
+setup wizard configures the server defaults: this dev container asks it for
+OpenRouter with `glm-5.3-flash`. Override either for one run with Fabro's own
+options:
 
 ```sh
 fabro run implement-spec --environment local --provider openai --model gpt-5.4-mini

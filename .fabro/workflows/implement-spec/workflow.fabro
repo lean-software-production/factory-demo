@@ -1,25 +1,59 @@
 digraph ImplementSpec {
-    graph [goal="Implement docs/spec.md one validated step at a time"]
+    graph [
+        goal="Implement docs/spec.md one validated step at a time",
+        model_stylesheet="
+            .plan-review { provider: openrouter; reasoning_effort: high; }
+            #review_kimi     { model: kimi-k3; }
+            #review_deepseek { model: deepseek-v4-pro; }
+            #review_glm      { model: glm-5.3; }
+            #implement { model: gpt-5.6-luna; provider: openrouter; }
+        "
+    ]
     rankdir=LR
 
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Done"]
 
     plan [label="Plan", prompt="@prompts/plan.md"]
+
+    review_fork [label="Three Brains Review", shape=component]
+    review_kimi     [label="Kimi Review",     class="plan-review", prompt="@prompts/review-plan.md", max_tokens=32000]
+    review_deepseek [label="DeepSeek Review", class="plan-review", prompt="@prompts/review-plan.md", max_tokens=32000]
+    review_glm      [label="GLM Review",      class="plan-review", prompt="@prompts/review-plan.md", max_tokens=32000]
+    review_merge [
+        label="Collect Suggestions",
+        shape=tripleoctagon,
+        prompt="@prompts/collect-reviews.md"
+    ]
+    refine_plan [
+        label="Refine Plan",
+        prompt="@prompts/refine-plan.md",
+        fidelity="summary:high"
+    ]
+
     implement [
         label="Implement",
         prompt="@prompts/implement.md",
+        max_tokens=64000,
         max_visits=20
     ]
     validate [
         label="Validate",
         prompt="@prompts/validate.md",
+        max_tokens=32000,
         output_schema="routing",
         on_failure="exit",
         max_visits=20
     ]
 
-    start -> plan -> implement -> validate
+    start -> plan -> review_fork
+    review_fork -> review_kimi
+    review_fork -> review_deepseek
+    review_fork -> review_glm
+    review_kimi     -> review_merge
+    review_deepseek -> review_merge
+    review_glm      -> review_merge
+    review_merge -> refine_plan -> implement -> validate
 
     validate -> implement [
         label="Continue"
