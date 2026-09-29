@@ -15,105 +15,110 @@ writes `docs/plan.md`, and implements one validated plan step at a time.
 
 ## Getting started
 
-This project runs inside a dev container, so the Fabro CLI, a local Fabro
-server, and the setup wizard all come with it. There are two ways to open it.
+This project runs inside a dev container, which provides the Fabro CLI, a local
+Fabro server, and a setup wizard. Run the Fabro commands below from a terminal
+inside the container.
 
 ### In a GitHub Codespace
 
-Create a Codespace on this repository. Everything is installed for you, and the
-Fabro server starts automatically on port 32276.
+Create a Codespace on this repository. The container and Fabro server start
+automatically, and the setup wizard opens in the terminal.
 
-Run the commands in the Codespace's own terminal:
+Once setup is complete, check the server and run the workflow:
 
 ```sh
-bin/dev status              # provider and server status
-bin/dev ui                  # web UI URL and development token
-bin/dev run implement-spec  # run a workflow
+fabro-status
+fabro server status
+fabro run implement-spec --environment local
 ```
 
-To open the web UI, use the URL from `bin/dev ui` -- the forwarded
-`*.app.github.dev` address, not `localhost`. Open it from the editor's PORTS
-panel if the GitHub sign-in handshake stalls. The UI asks for the development
-token that `bin/dev ui` prints.
+The `local` environment runs the workflow in the checked-out repository. Keep
+this option in a Codespace: its dev container does not expose a Docker daemon,
+which Fabro's default Docker environment requires.
 
+To use the web UI, open port 32276 from the editor's PORTS panel. Use the
+forwarded `*.app.github.dev` address rather than `localhost`. The UI asks for
+the development token, which you can print from the Codespace terminal:
+
+```sh
+cat ~/.fabro/storage/server.dev-token
+```
+
+Open the port from the PORTS panel if the GitHub sign-in handshake stalls.
 Forwarded ports are private to you by default.
 
-`bin/dev up` and `bin/dev down` are for a local Dev Container only.
+### Running locally
 
-### Running locally via VS Code
+You need Docker running on your host. You can use either:
 
-You need Docker running on your host, and then either:
+- the [VS Code Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers):
+  open the repository and choose *Reopen in Container*; or
+- the [`devcontainer` CLI](https://github.com/devcontainers/cli): from the
+  repository root, start the container and enter a shell with:
 
-- the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers),
-  to open the folder and choose *Reopen in Container*, or
-- the [`devcontainer` CLI](https://github.com/devcontainers/cli), to start and
-  stop the container from a host shell:
+  ```sh
+  devcontainer up
+  devcontainer exec bash
+  ```
 
-```sh
-bin/dev up      # devcontainer up --workspace-folder .
-bin/dev down    # stop the container
-```
-
-`bin/dev up` calls `devcontainer` directly, so without that CLI it fails with
-`devcontainer: command not found`.
-
-You can then run the commands from inside the container, as in a Codespace, or
-drive it from your host:
+VS Code opens the setup wizard automatically. The CLI does not open an editor,
+so run the wizard yourself after entering the container:
 
 ```sh
-bin/dev status              # runs `docker exec` against the running container
-bin/dev ui                  # prints http://localhost:32276 and the token
-bin/dev run implement-spec
+fabro-setup
+bash .devcontainer/fabro-bind.sh
 ```
 
-The web UI is at `http://localhost:32276` here -- the address `bin/dev ui`
-prints, and unlike a Codespace, plain `localhost` is correct. The PORTS panel
-lists 32276 twice, once as *Dev Containers* (from `forwardPorts`) and once as
-*Statically Forwarded* (from `appPort`). Both reach the same server, so the
-duplicate row is expected rather than a misconfiguration.
+The second command makes the newly configured server reachable through Docker's
+published port. It is harmless if the server is already configured.
 
-`bin/dev` detects which side it is on: inside the container it runs the Fabro
-CLI directly, and on the host it finds the container by its
-`devcontainer.local_folder` label and uses `docker exec`. From the host the
-container must be running.
+Then use the same Fabro commands as in a Codespace:
+
+```sh
+fabro-status
+fabro server status
+fabro run implement-spec --environment local
+```
+
+The local web UI is at <http://localhost:32276>. Print its development token
+from inside the container:
+
+```sh
+cat ~/.fabro/storage/server.dev-token
+```
+
+VS Code's PORTS panel lists 32276 twice, once as *Dev Containers* and once as
+*Statically Forwarded*. Both entries reach the same server; the duplicate is
+expected.
 
 ### Connecting an LLM account
 
 The [`fabro` dev container feature](https://github.com/lean-software-production/devcontainer-features/tree/main/src/fabro)
-ships a setup wizard, which `.vscode/tasks.json` runs whenever VS Code opens the
-folder -- in a Codespace and a local Dev Container alike. Starting the container
-from a host shell with `bin/dev up` opens no editor, so run `bin/dev setup`
-yourself in that case.
+provides `fabro-setup`. The wizard asks which LLM account to use. Choosing
+OpenAI signs you in with a ChatGPT or Codex subscription using an OAuth device
+code. Anthropic and OpenRouter prompt for an API key instead.
 
-The wizard asks which LLM account to use. Choosing OpenAI signs you in with a
-ChatGPT or Codex subscription over an OAuth device code -- it prints a URL and a
-short code, and you enter the code in a browser. Because nothing calls back to
-`localhost`, the same flow works in a browser-based Codespace, in VS Code
-Desktop, and over SSH. Anthropic and OpenRouter prompt for an API key instead.
-
-If the wizard does not appear, or you want to change providers later:
+If the wizard does not appear, or you want to change providers later, run:
 
 ```sh
-bin/dev setup         # run the wizard, then restart the server
-fabro-setup --force   # switch providers, or retry a failed sign-in
+fabro-setup           # configure Fabro if needed
+fabro-setup --force   # switch providers or retry a failed sign-in
 fabro-status          # report which credentials are configured
 ```
 
-Credentials are stored in the Fabro server vault under `~/.fabro`. A rebuild
-discards them and the wizard runs again. Never commit an API key to this
-repository.
+Credentials are stored in the Fabro server vault under `~/.fabro`, never in the
+repository. Rebuilding the container discards them.
 
 ### Choosing a provider per run
 
-The workflow pins neither provider nor model, so a run uses what the wizard
-wrote to `[run.model]` in `~/.fabro/settings.toml`. For OpenAI that is a
-specific model, `gpt-5.6-luna`, rather than the provider's own default. Override
-either per run:
+The workflow pins neither provider nor model. The setup wizard configures the
+server defaults; for OpenAI it selects `gpt-5.6-luna`. Override either for one
+run with Fabro's own options:
 
 ```sh
-bin/dev run implement-spec --provider openai --model gpt-5.4-mini
+fabro run implement-spec --environment local --provider openai --model gpt-5.4-mini
 ```
 
-Fabro can use a ChatGPT/Codex subscription through OpenAI OAuth. Its documented
-Anthropic integration requires separately billed API credentials; a Claude
-subscription alone is not sufficient.
+Fabro can use a ChatGPT or Codex subscription through OpenAI OAuth. Its
+documented Anthropic integration requires separately billed API credentials; a
+Claude subscription alone is not sufficient.
