@@ -126,7 +126,7 @@ repository. Rebuilding the container discards them.
 ### Model catalog
 
 Fabro's built-in OpenRouter catalog does not include GLM 5.3 or GLM 5.3 Flash.
-[`.devcontainer/fabro-models.sh`](.devcontainer/fabro-models.sh) declares both
+[`.devcontainer/fabro-models.sh`](.devcontainer/fabro-models.sh) declares them
 in `~/.fabro/settings.toml`; Fabro reads model definitions only from the
 server's settings, not from `.fabro/project.toml`. The script runs when the
 container starts and again before the setup wizard.
@@ -134,9 +134,13 @@ container starts and again before the setup wizard.
 It also makes GLM 5.3 Flash OpenRouter's default model and the one
 `fabro provider login` tests your API key against. Fabro's own choice,
 Claude Sonnet 5, fails that test on keys whose OpenRouter guardrail blocks
-Claude models. The model catalog must exist before the wizard runs; if the
-wizard reports that `glm-5.3-flash` is not in the catalog, run
-`bash .devcontainer/fabro-models.sh` and then `fabro-setup --force`.
+Claude models. It also sends DeepSeek V4 Pro requests to the dated snapshot
+`deepseek/deepseek-v4-pro-0813`, the version the demo's OpenRouter guardrail
+approves.
+
+The model catalog must exist before the wizard runs. If the wizard reports that
+`glm-5.3-flash` is not in the catalog, run `bash .devcontainer/fabro-models.sh`
+and then `fabro-setup --force`.
 
 ### Choosing a provider per run
 

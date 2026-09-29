@@ -12,6 +12,9 @@
 # glm-5.3-flash also becomes OpenRouter's default and probe model, the one
 # `fabro provider login` tests the API key against. The built-in default,
 # claude-sonnet-5, fails that test on keys whose guardrail blocks Claude.
+#
+# deepseek-v4-pro is sent as the dated snapshot deepseek/deepseek-v4-pro-0813,
+# the version the demo's OpenRouter guardrail approves.
 set -uo pipefail
 
 settings="${HOME}/.fabro/settings.toml"
@@ -36,6 +39,9 @@ features = { tools = true, vision = false, reasoning = true, reasoning_effort = 
 controls = { reasoning_effort = ["high", "xhigh"] }
 costs = { input_cost_per_mtok = 0.15, output_cost_per_mtok = 0.5 }
 
+[llm.providers.openrouter.models.deepseek-v4-pro]
+api_id = "deepseek/deepseek-v4-pro-0813"
+
 [llm.providers.openrouter.models."glm-5.3"]
 display_name = "GLM 5.3"
 api_id = "z-ai/glm-5.3"
@@ -55,7 +61,8 @@ awk -v prefix="[${prefix}." '
     /^\[/ {
         drop = ($0 == prefix "claude-sonnet-5]" \
              || $0 == prefix "\"glm-5.3-flash\"]" \
-             || $0 == prefix "\"glm-5.3\"]")
+             || $0 == prefix "\"glm-5.3\"]" \
+             || $0 == prefix "deepseek-v4-pro]")
     }
     !drop { print }
 ' "${settings}" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > "${tmp}"
