@@ -74,14 +74,15 @@ VS Code opens the setup wizard automatically. The CLI does not open an editor,
 so run the wizard yourself after entering the container:
 
 ```sh
-bash .devcontainer/fabro-models.sh
 fabro-setup
+bash .devcontainer/fabro-models.sh
 bash .devcontainer/fabro-bind.sh
 ```
 
-The first command adds the GLM 5.3 models to the server's catalog (see
-[Model catalog](#model-catalog)). The last makes the newly configured server
-reachable through Docker's published port. Both are harmless to run again.
+The second command adds the models the workflow's reviewers need to the
+server's catalog (see [Model catalog](#model-catalog)). The third makes the
+newly configured server reachable through Docker's published port. Both are
+harmless to run again.
 
 Then use the same Fabro commands as in a Codespace:
 
@@ -126,21 +127,19 @@ repository. Rebuilding the container discards them.
 ### Model catalog
 
 Fabro's built-in OpenRouter catalog does not include GLM 5.3 or GLM 5.3 Flash.
-[`.devcontainer/fabro-models.sh`](.devcontainer/fabro-models.sh) declares them
-in `~/.fabro/settings.toml`; Fabro reads model definitions only from the
-server's settings, not from `.fabro/project.toml`. The script runs when the
-container starts and again before the setup wizard.
+Fabro reads model definitions only from the server's `~/.fabro/settings.toml`,
+not from `.fabro/project.toml`, so two things add them there:
 
-It also makes GLM 5.3 Flash OpenRouter's default model and the one
-`fabro provider login` tests your API key against. Fabro's own choice,
-Claude Sonnet 5, fails that test on keys whose OpenRouter guardrail blocks
-Claude models. It also sends DeepSeek V4 Pro requests to the dated snapshot
-`deepseek/deepseek-v4-pro-0813`, the version the demo's OpenRouter guardrail
-approves.
-
-The model catalog must exist before the wizard runs. If the wizard reports that
-`glm-5.3-flash` is not in the catalog, run `bash .devcontainer/fabro-models.sh`
-and then `fabro-setup --force`.
+- The dev container sets the fabro Feature's `model` option to
+  `z-ai/glm-5.3-flash`. The setup wizard (Feature 1.3.0 or later) adds GLM 5.3
+  Flash to the catalog, makes it the server default, and tests your API key
+  against it. That test would otherwise use Claude Sonnet 5, which fails on
+  keys whose OpenRouter guardrail blocks Claude models.
+- [`.devcontainer/fabro-models.sh`](.devcontainer/fabro-models.sh) adds GLM
+  5.3 for the GLM reviewer, and sends DeepSeek V4 Pro requests to the dated
+  snapshot `deepseek/deepseek-v4-pro-0813`, the version the demo's OpenRouter
+  guardrail approves. It runs when the container starts and again after the
+  setup wizard.
 
 ### Choosing a provider per run
 

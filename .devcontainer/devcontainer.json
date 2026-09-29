@@ -5,7 +5,7 @@
     "ghcr.io/lean-software-production/devcontainer-features/fabro:1": {
       "version": "0.348.0-nightly.0",
       "provider": "openrouter",
-      "model": "glm-5.3-flash"
+      "model": "z-ai/glm-5.3-flash"
     }
   },
   "forwardPorts": [
