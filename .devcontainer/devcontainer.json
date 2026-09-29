@@ -4,7 +4,8 @@
   "features": {
     "ghcr.io/lean-software-production/devcontainer-features/fabro:1": {
       "version": "0.348.0-nightly.0",
-      "provider": "openrouter"
+      "provider": "openrouter",
+      "model": "glm-5.3-flash"
     }
   },
   "forwardPorts": [
@@ -19,5 +20,5 @@
       "onAutoForward": "silent"
     }
   },
-  "postStartCommand": "bash .devcontainer/fabro-bind.sh"
+  "postStartCommand": "bash .devcontainer/fabro-models.sh && bash .devcontainer/fabro-bind.sh"
 }

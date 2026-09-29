@@ -16,9 +16,10 @@ writes `docs/plan.md`, and implements one validated plan step at a time.
 Before implementation starts, three open-weight models on OpenRouter (Kimi K3,
 DeepSeek V4 Pro and GLM 5.3) review the plan in parallel. Each returns its top
 three suggestions, and a final step updates `docs/plan.md` with them. The
-implementation step also runs on GPT-5.6 Luna through OpenRouter, so the
-workflow needs an OpenRouter API key. The setup wizard offers OpenRouter first
-and enables it on the Fabro server for you. See the
+implementation step also runs on GPT-5.6 Luna through OpenRouter, and the
+remaining steps use GLM 5.3 Flash, the server default. The workflow therefore
+needs an OpenRouter API key. The setup wizard offers OpenRouter first and
+enables it on the Fabro server for you. See the
 [OpenRouter guide](docs/reference/fabro/integrations/openrouter.md).
 
 ## Getting started
@@ -37,7 +38,7 @@ Once setup is complete, check the server and run the workflow:
 ```sh
 fabro-status
 fabro server status
-fabro run implement-spec --environment local --provider openrouter --model gpt-5.6-luna
+fabro run implement-spec --environment local
 ```
 
 The `local` environment runs the workflow in the checked-out repository. Keep
@@ -73,19 +74,21 @@ VS Code opens the setup wizard automatically. The CLI does not open an editor,
 so run the wizard yourself after entering the container:
 
 ```sh
+bash .devcontainer/fabro-models.sh
 fabro-setup
 bash .devcontainer/fabro-bind.sh
 ```
 
-The second command makes the newly configured server reachable through Docker's
-published port. It is harmless if the server is already configured.
+The first command adds the GLM 5.3 models to the server's catalog (see
+[Model catalog](#model-catalog)). The last makes the newly configured server
+reachable through Docker's published port. Both are harmless to run again.
 
 Then use the same Fabro commands as in a Codespace:
 
 ```sh
 fabro-status
 fabro server status
-fabro run implement-spec --environment local --provider openrouter --model gpt-5.6-luna
+fabro run implement-spec --environment local
 ```
 
 The local web UI is at <http://localhost:32276>. Print its development token
@@ -120,13 +123,29 @@ fabro-status          # report which credentials are configured
 Credentials are stored in the Fabro server vault under `~/.fabro`, never in the
 repository. Rebuilding the container discards them.
 
+### Model catalog
+
+Fabro's built-in OpenRouter catalog does not include GLM 5.3 or GLM 5.3 Flash.
+[`.devcontainer/fabro-models.sh`](.devcontainer/fabro-models.sh) declares both
+in `~/.fabro/settings.toml`; Fabro reads model definitions only from the
+server's settings, not from `.fabro/project.toml`. The script runs when the
+container starts and again before the setup wizard.
+
+It also makes GLM 5.3 Flash OpenRouter's default model and the one
+`fabro provider login` tests your API key against. Fabro's own choice,
+Claude Sonnet 5, fails that test on keys whose OpenRouter guardrail blocks
+Claude models. The model catalog must exist before the wizard runs; if the
+wizard reports that `glm-5.3-flash` is not in the catalog, run
+`bash .devcontainer/fabro-models.sh` and then `fabro-setup --force`.
+
 ### Choosing a provider per run
 
 The workflow pins the plan reviewers and the implementation step to OpenRouter
 models; these always win over run options. The other steps (plan, collecting
 reviews, refining the plan and validation) use the run's default model. The
-setup wizard configures the server defaults; for OpenAI it selects
-`gpt-5.6-luna`. Override either for one run with Fabro's own options:
+setup wizard configures the server defaults: this dev container asks it for
+OpenRouter with `glm-5.3-flash`. Override either for one run with Fabro's own
+options:
 
 ```sh
 fabro run implement-spec --environment local --provider openai --model gpt-5.4-mini
