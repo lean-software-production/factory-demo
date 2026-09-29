@@ -4,7 +4,7 @@
   "features": {
     "ghcr.io/lean-software-production/devcontainer-features/fabro:1": {
       "version": "0.348.0-nightly.0",
-      "provider": "openai"
+      "provider": "openrouter"
     }
   },
   "forwardPorts": [

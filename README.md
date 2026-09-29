@@ -13,6 +13,14 @@ A local snapshot of the official Fabro documentation is available at
 The `implement-spec` workflow reads the [Tetris specification](docs/spec.md),
 writes `docs/plan.md`, and implements one validated plan step at a time.
 
+Before implementation starts, three open-weight models on OpenRouter (Kimi K3,
+DeepSeek V4 Pro and GLM 5.3) review the plan in parallel. Each returns its top
+three suggestions, and a final step updates `docs/plan.md` with them. The
+implementation step also runs on GPT-5.6 Luna through OpenRouter, so the
+workflow needs an OpenRouter API key. The setup wizard offers OpenRouter first
+and enables it on the Fabro server for you. See the
+[OpenRouter guide](docs/reference/fabro/integrations/openrouter.md).
+
 ## Getting started
 
 This project runs inside a dev container, which provides the Fabro CLI, a local
@@ -29,7 +37,7 @@ Once setup is complete, check the server and run the workflow:
 ```sh
 fabro-status
 fabro server status
-fabro run implement-spec --environment local
+fabro run implement-spec --environment local --provider openrouter --model gpt-5.6-luna
 ```
 
 The `local` environment runs the workflow in the checked-out repository. Keep
@@ -77,7 +85,7 @@ Then use the same Fabro commands as in a Codespace:
 ```sh
 fabro-status
 fabro server status
-fabro run implement-spec --environment local
+fabro run implement-spec --environment local --provider openrouter --model gpt-5.6-luna
 ```
 
 The local web UI is at <http://localhost:32276>. Print its development token
@@ -94,9 +102,12 @@ expected.
 ### Connecting an LLM account
 
 The [`fabro` dev container feature](https://github.com/lean-software-production/devcontainer-features/tree/main/src/fabro)
-provides `fabro-setup`. The wizard asks which LLM account to use. Choosing
+provides `fabro-setup`. The wizard asks which LLM account to use, offering
+OpenRouter first because the workflow's reviewers run there. OpenRouter and
+Anthropic prompt for an API key. Fabro ships OpenRouter disabled, so choosing
+it also enables it in `~/.fabro/settings.toml` before signing in. Choosing
 OpenAI signs you in with a ChatGPT or Codex subscription using an OAuth device
-code. Anthropic and OpenRouter prompt for an API key instead.
+code.
 
 If the wizard does not appear, or you want to change providers later, run:
 
@@ -111,9 +122,11 @@ repository. Rebuilding the container discards them.
 
 ### Choosing a provider per run
 
-The workflow pins neither provider nor model. The setup wizard configures the
-server defaults; for OpenAI it selects `gpt-5.6-luna`. Override either for one
-run with Fabro's own options:
+The workflow pins the plan reviewers and the implementation step to OpenRouter
+models; these always win over run options. The other steps (plan, collecting
+reviews, refining the plan and validation) use the run's default model. The
+setup wizard configures the server defaults; for OpenAI it selects
+`gpt-5.6-luna`. Override either for one run with Fabro's own options:
 
 ```sh
 fabro run implement-spec --environment local --provider openai --model gpt-5.4-mini
